@@ -1,0 +1,58 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="photo.css">
+<style>
+  html, body { width: 100%; height: 100%; overflow: hidden; }
+  .leaf { position: fixed; will-change: transform, opacity; pointer-events: none; }
+  .leaf .marker path { stroke-dashoffset: 0; }
+  .leaf .toss { display: none; }
+</style>
+</head>
+<body>
+<script type="module">
+import { native } from './common.js';
+
+let falling = 0;
+const between = (a, b) => a + Math.random() * (b - a);
+
+// Paper settling through the air: it sways side to side, tilting into each swing, and fades before it lands.
+window.drop = (html, x, y, w, direction) => {
+  const leaf = document.createElement('div');
+  leaf.className = 'leaf';
+  leaf.style.cssText = `left:${x}px;top:${y}px;width:${w}px`;
+  leaf.innerHTML = html;
+  document.body.appendChild(leaf);
+  falling += 1;
+
+  const distance = Math.min(innerHeight * between(.5, .68), 960);
+  const drift = direction * between(40, 170);
+  const swayX = between(38, 78);
+  const swayTurn = between(9, 17);
+  const swings = between(1.15, 1.75);
+  const phase = direction * between(.2, .8);
+  const frames = [];
+  const steps = 22;
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const wave = Math.sin(t * Math.PI * 2 * swings + phase);
+    const start = Math.sin(phase);
+    const fall = distance * (t * t * .35 + t * .65); // catches the air, then settles at a steady rate
+    const px = drift * t + swayX * (wave - start) * Math.min(1, t * 3);
+    const turn = swayTurn * wave * Math.min(1, t * 3) + direction * 7 * t;
+    frames.push({
+      transform: `translate(${px.toFixed(1)}px, ${fall.toFixed(1)}px) rotate(${turn.toFixed(2)}deg) scale(${(1 - .16 * t).toFixed(3)})`,
+      opacity: t < .7 ? 1 : Math.max(0, 1 - (t - .7) / .3),
+    });
+  }
+  const run = leaf.animate(frames, { duration: between(1350, 1900), easing: 'linear', fill: 'forwards' });
+  run.onfinish = () => {
+    leaf.remove();
+    falling -= 1;
+    if (falling === 0) native({ type: 'idle' });
+  };
+};
+</script>
+</body>
+</html>

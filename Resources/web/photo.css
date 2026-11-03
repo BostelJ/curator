@@ -1,0 +1,54 @@
+/* The vintage print look shared by every surface: clean white paper, a black border, nothing fussy. */
+:root {
+  --paper: #fbfaf6;
+  --black: #111010;
+  --ink: #1b1917;
+  --muted: rgba(27,25,23,.58);
+  --marker: #e5391f;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --hand: "Marker Felt", "Noteworthy", cursive; /* chosen in a Curator tournament */
+  --serif: "New York", "Iowan Old Style", Georgia, serif;
+  --lift: 0 1px 2px rgba(0,0,0,.28), 0 12px 28px rgba(0,0,0,.34);
+}
+
+* { box-sizing: border-box; -webkit-user-select: none; user-select: none; }
+html, body { margin: 0; background: transparent; font: 13px -apple-system, "SF Pro Text", system-ui, sans-serif; color: var(--ink); overflow: hidden; }
+
+/* An instant print, chosen in Curator's own first tournament: white paper, a thin black keyline
+   around the photo, and a deep lower margin for the handwritten caption. */
+.print { position: relative; background: var(--paper); padding: 15px; padding-bottom: 0; box-shadow: var(--lift); border-radius: 1px; }
+.photo { position: relative; display: block; aspect-ratio: 4 / 3; background: #000; border: 1.5px solid var(--black); }
+.shot { display: block; width: 100%; height: 100%; object-fit: cover; background: #d9d5cc center / cover no-repeat; }
+.shot.model.broken::after { content: "couldn't load model"; position: absolute; inset: 0; display: grid; place-items: center; font: 11px var(--mono); color: #555; }
+.tag-3d { position: absolute; top: 6px; right: 6px; font: 600 9px var(--mono); padding: 2px 5px; color: var(--paper); background: var(--black); }
+.caption { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; min-height: 64px; padding: 15px 3px 12px; }
+.label { font: 400 20px/1.05 var(--hand); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.num { font: 600 10px var(--mono); letter-spacing: .04em; color: var(--muted); white-space: nowrap; }
+
+/* The china marker. Draws itself when `drawn` goes on. */
+.marker { position: absolute; inset: -9px; width: calc(100% + 18px); height: calc(100% + 18px); pointer-events: none; overflow: visible; z-index: 3; }
+.marker path { fill: none; stroke: var(--marker); stroke-width: 4.5; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1; stroke-dashoffset: 1; filter: drop-shadow(0 1px 0 rgba(0,0,0,.25)); }
+.marker.drawn path { stroke-dashoffset: 0; transition: stroke-dashoffset .2s cubic-bezier(.45,.05,.3,1); }
+
+button {
+  font: 600 12px -apple-system, system-ui, sans-serif;
+  border: 1.5px solid var(--black); border-radius: 2px; padding: 5px 10px;
+  color: var(--ink); background: var(--paper);
+  cursor: default;
+  transition: background .12s, transform .08s;
+}
+button:hover { background: #ebe8df; }
+button:active { transform: scale(.97); }
+button:disabled { opacity: .35; }
+button.primary { background: var(--black); color: var(--paper); }
+button.primary:hover { background: #33302c; }
+kbd { font: 600 10px var(--mono); opacity: .6; margin-left: 5px; }
+
+textarea {
+  width: 100%; resize: none; outline: 0; border: 1.5px solid var(--black); border-radius: 2px;
+  padding: 8px 9px; min-height: 56px;
+  font: 13px/1.4 -apple-system, system-ui, sans-serif;
+  color: var(--ink); background: #fff;
+  -webkit-user-select: text; user-select: text;
+}
+textarea::placeholder { color: #8a8378; }

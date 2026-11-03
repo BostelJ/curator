@@ -1,0 +1,256 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="photo.css">
+<script type="importmap">{"imports":{"three":"./vendor/three.module.js"}}</script>
+<style>
+  #root { position: fixed; right: 0; bottom: 0; padding: 30px 22px 22px 34px; }
+  #root:empty { padding: 0; width: 0; height: 0; }
+
+  .pile { position: relative; width: 300px; }
+  .pile.big { width: 640px; }
+
+  /* Prints behind the top one peek out above it. */
+  .behind { position: absolute; left: 0; right: 0; height: 60px; background: var(--paper); box-shadow: var(--lift); transform-origin: bottom center; }
+
+  .card { position: relative; animation: slidein .3s cubic-bezier(.2,.9,.25,1.05); }
+  @keyframes slidein { from { transform: translateX(120%) rotate(3deg); } to { transform: none; } }
+  .toss { position: absolute; top: 5px; right: 5px; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; color: var(--muted); font: 500 17px/20px -apple-system, system-ui, sans-serif; opacity: 0; z-index: 4; }
+  .card:hover .toss { opacity: 1; }
+  .toss:hover { color: var(--marker); background: transparent; }
+
+  .card .print { padding-bottom: 15px; }
+  #main { cursor: zoom-in; }
+  .pile.big #main { aspect-ratio: auto; height: 430px; cursor: default; }
+  .pile.big #main .shot { object-fit: contain; background-color: #f1efe9; }
+  .viewer { position: absolute; inset: 0; overflow: hidden; background: #d9d5cc; }
+  .viewer canvas { display: block; width: 100%; height: 100%; }
+
+  .thumbs { display: flex; gap: 6px; margin-top: 8px; }
+  .thumb { width: 56px; height: 42px; overflow: hidden; opacity: .55; cursor: default; flex: none; position: relative; border: 1.5px solid var(--black); }
+  .thumb.on { opacity: 1; outline: 2px solid var(--marker); outline-offset: 1px; }
+  .thumb .tag-3d { top: 1px; right: 1px; font-size: 7px; padding: 1px 3px; }
+
+  .project { font: 600 9px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .name { font: 400 21px/1.1 var(--hand); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .prompt { font-size: 12px; color: var(--muted); margin-top: 2px; line-height: 1.35; }
+  .text { padding: 14px 3px 0; }
+  .topline { display: flex; justify-content: space-between; gap: 8px; }
+  .actions { display: flex; gap: 6px; margin-top: 9px; align-items: center; }
+  .actions .grow { flex: 1; }
+  .notebox { margin-top: 9px; }
+  .notebox .actions { justify-content: flex-end; }
+
+  .slip { padding: 14px 15px 13px; background: var(--paper); box-shadow: var(--lift); border: 2px solid var(--black); }
+  .slip .rule { font: 400 22px/1.2 var(--hand); margin: 7px 0 6px; }
+  .slip .why { font-size: 12px; line-height: 1.35; color: var(--muted); }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="module">
+import { api, state, media, frameHTML, fillModels, reportSize, native, esc } from './common.js';
+
+const root = document.getElementById('root');
+reportSize(root);
+
+let cards = [];
+let topId = null, big = false, noteOpen = false, shown = 0, busy = false;
+let stopViewer = null;
+
+function stop3D() { stopViewer?.(); stopViewer = null; }
+
+function behindHTML(n) {
+  const peek = Math.min(n, 3);
+  let html = '';
+  for (let i = peek; i >= 1; i--) {
+    const angle = (i % 2 ? 1 : -1) * (0.8 + i * 0.3);
+    html += `<div class="behind" style="top:${-i * 8}px; left:${i * 3}px; right:${i * 3}px; transform:rotate(${angle}deg)"></div>`;
+  }
+  return html;
+}
+
+function slipHTML(rule) {
+  return `<div class="card slip" id="card">
+    <div class="project">${esc(rule.project)} · proposed taste rule</div>
+    <div class="rule">${esc(rule.text)}</div>
+    ${rule.why ? `<div class="why">${esc(rule.why)}</div>` : ''}
+    <div class="actions"><span class="grow"></span><button id="decline">Not quite</button><button class="primary" id="accept">Yes, that's my taste</button></div>
+  </div>`;
+}
+
+function printHTML(item) {
+  const frame = item.frames[shown] || item.frames[0];
+  const thumbs = big && item.frames.length > 1
+    ? `<div class="thumbs">${item.frames.map((f, i) => `<div class="thumb ${i === shown ? 'on' : ''}" data-i="${i}">${frameHTML(f)}</div>`).join('')}</div>` : '';
+  const main = big && frame.kind === 'model'
+    ? `<div class="viewer" id="viewer"></div>`
+    : frameHTML(frame, { eager: true });
+  return `<div class="card" id="card"><div class="print" id="sheet">
+      <button class="toss" id="toss" title="Delete this card">×</button>
+      <div class="photo" id="main">${main}</div>
+      ${thumbs}
+      <div class="text">
+        <div class="topline"><span class="project">${esc(item.project)}</span><span class="num">${item.pass ? `Pass ${item.pass}` : ''}${item.frames.length > 1 ? ` · ${big ? `image ${shown + 1} of ${item.frames.length}` : `${item.frames.length} images`}` : ''}</span></div>
+        <div class="name">${esc(item.title)}</div>
+        ${item.prompt ? `<div class="prompt">${esc(item.prompt)}</div>` : ''}
+        ${item.replacesTitles ? `<div class="prompt">Keeping this replaces ${item.replacesTitles.map((t) => `“${esc(t)}”`).join(', ')} on the wall.</div>` : ''}
+        ${noteOpen ? `<div class="notebox">
+            <textarea id="note" placeholder="Any changes? Goes to the agent word for word…"></textarea>
+            <div class="actions"><button id="cancel">Cancel</button><button class="primary" id="send">Send note</button></div>
+          </div>` : `<div class="actions">
+            <button class="primary" id="keep">Keep<kbd>⌃⌥K</kbd></button>
+            <button id="noteBtn">Note<kbd>${big ? 'N' : '⌃⌥N'}</kbd></button>
+            <span class="grow"></span>
+            ${big ? '<button id="shrink">Smaller<kbd>esc</kbd></button>' : ''}
+            ${cards.length > 1 ? `<span class="num">${cards.length - 1} more waiting</span>` : ''}
+          </div>`}
+      </div>
+    </div></div>`;
+}
+
+function tellNative() {
+  const film = cards[0]?.kind === 'film';
+  let keys = [];
+  if (film && !noteOpen) {
+    keys = ['keep', 'noteAny', 'deleteAny'];
+    // Plain keys are only taken while you're looking at an enlarged card, so they can't catch your typing.
+    if (big) keys.push('noteBare', 'deleteBare', 'escape');
+  }
+  native({ type: 'keys', keys });
+}
+
+function render() {
+  tellNative();
+  stop3D();
+  const top = cards[0];
+  if (!top) { root.innerHTML = ''; return; }
+  const isRule = top.kind === 'rule';
+  root.innerHTML = `<div class="pile ${big && !isRule ? 'big' : ''}">${behindHTML(cards.length - 1)}${isRule ? slipHTML(top.data) : printHTML(top.data)}</div>`;
+  if (isRule) {
+    document.getElementById('accept').onclick = () => answerRule(true);
+    document.getElementById('decline').onclick = () => answerRule(false);
+    return;
+  }
+  const item = top.data;
+  fillModels(root);
+  document.getElementById('main').onclick = () => { if (!big) { big = true; render(); } };
+  root.querySelectorAll('.thumb').forEach((t) => { t.onclick = () => { shown = Number(t.dataset.i); render(); }; });
+  const frame = item.frames[shown] || item.frames[0];
+  if (big && frame.kind === 'model') {
+    import('./viewer.js').then(async ({ mount }) => {
+      const holder = document.getElementById('viewer');
+      if (holder) stopViewer = await mount(holder, media(frame.file));
+    }).catch(console.error);
+  }
+  document.getElementById('shrink')?.addEventListener('click', () => { big = false; render(); });
+  document.getElementById('toss').onclick = (e) => { e.stopPropagation(); remove(); };
+  if (noteOpen) {
+    const box = document.getElementById('note');
+    box.focus();
+    box.onkeydown = (e) => {
+      if (e.key === 'Escape') closeNote();
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendNote(box.value); }
+    };
+    document.getElementById('cancel').onclick = closeNote;
+    document.getElementById('send').onclick = () => sendNote(box.value);
+  } else {
+    document.getElementById('keep').onclick = keep;
+    document.getElementById('noteBtn').onclick = openNote;
+  }
+}
+
+function openNote() {
+  if (cards[0]?.kind !== 'film') return;
+  noteOpen = true;
+  native({ type: 'typing', on: true });
+  render();
+  setTimeout(() => document.getElementById('note')?.focus(), 30);
+}
+
+function closeNote() {
+  noteOpen = false;
+  native({ type: 'typing', on: false });
+  render();
+}
+
+// The card leaves the way a tossed print does: down through the air.
+async function leave(send) {
+  if (busy) return;
+  busy = true;
+  const card = document.getElementById('card');
+  if (card) {
+    const box = card.getBoundingClientRect();
+    const paper = document.getElementById('sheet') || card;
+    native({ type: 'leaf', html: paper.outerHTML, x: box.x, y: box.y, w: box.width, direction: -1 });
+  }
+  root.innerHTML = '';
+  if (noteOpen) { noteOpen = false; native({ type: 'typing', on: false }); }
+  try {
+    await send();
+  } catch (error) {
+    console.error(error);
+  }
+  busy = false;
+  topId = null; big = false; shown = 0;
+  refresh();
+}
+
+function keep() {
+  const top = cards[0];
+  if (top?.kind !== 'film') return;
+  leave(() => api('/api/answer', { id: top.data.id, action: 'keep' }));
+}
+
+function sendNote(note) {
+  const top = cards[0];
+  if (!note.trim() || top?.kind !== 'film') return;
+  leave(() => api('/api/answer', { id: top.data.id, action: 'note', note }));
+}
+
+function remove() {
+  const top = cards[0];
+  if (top?.kind !== 'film') return;
+  leave(() => api('/api/answer', { id: top.data.id, action: 'delete' }));
+}
+
+function answerRule(accept) {
+  const top = cards[0];
+  if (top?.kind !== 'rule') return;
+  leave(() => api('/api/rule/answer', { id: top.data.id, accept }));
+}
+
+window.curatorKey = (key) => {
+  if (key === 'keep') keep();
+  if (key === 'noteAny' || key === 'noteBare') { big = true; openNote(); }
+  if (key === 'deleteAny' || key === 'deleteBare') remove();
+  if (key === 'escape') { big = false; render(); }
+};
+
+let lastCount = 0;
+async function refresh() {
+  if (busy) return;
+  const s = await state();
+  cards = [
+    ...s.refine.map((data) => ({ kind: 'film', id: data.id, at: data.createdAt, data })),
+    ...s.proposedRules.map((data) => ({ kind: 'rule', id: data.id, at: data.createdAt, data })),
+  ].sort((a, b) => a.at - b.at);
+  const nextTop = cards[0]?.id ?? null;
+  if (nextTop !== topId) {
+    topId = nextTop;
+    big = false; shown = 0;
+    if (noteOpen) { noteOpen = false; native({ type: 'typing', on: false }); }
+    render();
+  } else if (!noteOpen && cards.length !== lastCount) {
+    render();
+  }
+  if (!cards.length) tellNative();
+  lastCount = cards.length;
+}
+
+window.curatorRefresh = refresh;
+refresh();
+</script>
+</body>
+</html>

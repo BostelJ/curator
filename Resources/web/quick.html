@@ -1,0 +1,323 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="photo.css">
+<script type="importmap">{"imports":{"three":"./vendor/three.module.js"}}</script>
+<style>
+  #root { position: absolute; left: 0; top: 0; width: max-content; padding: 14px 30px 44px; }
+  #root:empty { padding: 0; width: 0; height: 0; }
+
+  .ring { display: flex; gap: 34px; }
+  .contender { position: relative; width: var(--card); transition: transform .14s; }
+  .contender:hover { transform: translateY(-3px); }
+  .contender.sel { transform: translateY(-4px) scale(1.012); }
+  .contender.in-l { animation: inl .24s cubic-bezier(.2,.9,.25,1.05); }
+  .contender.in-r { animation: inr .24s cubic-bezier(.2,.9,.25,1.05); }
+  .contender.first { animation: arrive .3s cubic-bezier(.2,.9,.25,1.05); }
+  @keyframes inl { from { transform: translate(-22px,-46px) rotate(-3deg); opacity: 0; } }
+  @keyframes inr { from { transform: translate(22px,-46px) rotate(3deg); opacity: 0; } }
+  @keyframes arrive { from { transform: translateY(-120%); } }
+
+  .toss { position: absolute; top: 5px; right: 5px; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; color: var(--muted); font: 500 17px/20px -apple-system, system-ui, sans-serif; opacity: 0; z-index: 4; }
+  .contender:hover .toss { opacity: 1; }
+  .toss:hover { color: var(--marker); background: transparent; }
+
+  .notebox { margin-top: 14px; padding: 10px 11px 11px; background: var(--paper); box-shadow: var(--lift); }
+  .notebox .about { font-size: 12px; color: var(--muted); margin-bottom: 7px; }
+  .notebox .about b { color: var(--ink); }
+  .notebox .row { display: flex; gap: 6px; margin-top: 7px; justify-content: flex-end; }
+
+  .pill { display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; margin-top: -14px; background: var(--paper); border: 2px solid var(--black); border-top: 0; font-size: 12px; font-weight: 600; box-shadow: 0 6px 14px rgba(0,0,0,.3); cursor: default; }
+  .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--marker); }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="module">
+import { api, state, frameHTML, fillModels, markerSVG, reportSize, native, esc } from './common.js';
+
+const root = document.getElementById('root');
+reportSize(root);
+
+const IDLE_TUCK_MS = 45000; // a pick nobody's touched gets out of the way and lets go of the keys
+const ARM_MS = 400;         // a new card waits a moment before it takes the arrow keys
+const UNDO_MS = 500;        // the final choice waits this long before it's sent
+
+let item = null, waitingBehind = 0;
+let t = null;               // the tournament
+let armed = false, engaged = false, tucked = false, noteOpen = false, note = '';
+let selected = null, finishing = null;
+let idleTimer = null, armTimer = null, sendTimer = null;
+
+function shuffle(list) {
+  const out = [...list];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+function newTournament(frames) {
+  return { current: shuffle(frames.map((_, i) => i)), next: [], pos: 0, round: 1, matches: [], undo: [] };
+}
+
+// Moves past byes and finished rounds. Returns the two options up next, or the winner.
+function advance() {
+  while (true) {
+    if (t.pos + 1 < t.current.length) return { pair: [t.current[t.pos], t.current[t.pos + 1]] };
+    if (t.pos === t.current.length - 1) { t.next.push(t.current[t.pos]); t.pos += 1; continue; }
+    if (t.next.length === 1) return { winner: t.next[0] };
+    t.current = t.next; t.next = []; t.pos = 0; t.round += 1;
+  }
+}
+
+function tellNative() {
+  let keys = [];
+  if (item && !noteOpen) {
+    if (tucked) keys = ['bringBack'];
+    else if (finishing !== null) keys = ['undo'];
+    else if (armed) {
+      keys = ['left', 'right', 'escape', 'noteAny', 'deleteAny'];
+      // Plain keys are only taken once you're using this pick, so they can't catch your typing.
+      if (engaged) keys.push('enter', 'noteBare', 'deleteBare', 'undo');
+    }
+  }
+  native({ type: 'keys', keys });
+}
+
+function resetIdle() {
+  clearTimeout(idleTimer);
+  if (item && !tucked && !noteOpen && finishing === null) idleTimer = setTimeout(() => setTucked(true), IDLE_TUCK_MS);
+}
+
+function arm() {
+  armed = false;
+  clearTimeout(armTimer);
+  tellNative();
+  armTimer = setTimeout(() => { armed = true; tellNative(); }, ARM_MS);
+}
+
+function setTucked(on) {
+  if (finishing !== null) return;
+  tucked = on;
+  if (on) { engaged = false; armed = false; selected = null; clearTimeout(armTimer); }
+  render();
+  tellNative();
+  if (!on) arm();
+  resetIdle();
+}
+
+function contender(index, side, how) {
+  const frame = item.frames[index];
+  return `<div class="contender ${how === 'first' ? 'first' : how ? 'in-' + side : ''}" data-i="${index}" data-side="${side}">
+    <div class="print">
+      <button class="toss" title="Delete this pick">×</button>
+      <div class="photo">${frameHTML(frame, { eager: true })}</div>
+      <div class="caption"><span class="label">${esc(frame.label || '')}</span></div>
+    </div>
+  </div>`;
+}
+
+function render(how = false) {
+  if (!item) { root.innerHTML = ''; return; }
+  if (tucked) {
+    const n = waitingBehind + 1;
+    root.innerHTML = `<div class="pill" id="pill"><span class="dot"></span>${n} pick${n > 1 ? 's' : ''} waiting<kbd>⌃⌥P</kbd></div>`;
+    document.getElementById('pill').onclick = () => setTucked(false);
+    return;
+  }
+  if (finishing !== null) { root.innerHTML = ''; return; }
+  const size = Math.min(380, Math.floor((screen.availWidth - 120) / 2));
+  root.style.setProperty('--card', size + 'px');
+  const [a, b] = advance().pair;
+  root.innerHTML = `
+    <div class="ring">${contender(a, 'l', how)}${contender(b, 'r', how)}</div>
+    ${noteOpen ? `<div class="notebox">
+      <div class="about"><b>${esc(item.title)}</b>${item.prompt ? ' · ' + esc(item.prompt) : ''}${item.replacesTitles ? ` · Replaces ${item.replacesTitles.map((t) => `“${esc(t)}”`).join(', ')}` : ''}</div>
+      <textarea id="note" placeholder="Goes to the agent word for word…">${esc(note)}</textarea>
+      <div class="row"><button id="cancelNote">Cancel</button><button id="sendNone">None of these, redo</button><button class="primary" id="saveNote">Keep choosing</button></div>
+    </div>` : ''}`;
+  fillModels(root);
+  root.querySelectorAll('.contender').forEach((el) => {
+    el.onclick = () => { selected = el.dataset.side; paintSelection(); commit(); };
+    el.querySelector('.toss').onclick = (e) => { e.stopPropagation(); remove(); };
+  });
+  paintSelection();
+  if (noteOpen) {
+    const box = document.getElementById('note');
+    box.focus();
+    box.setSelectionRange(box.value.length, box.value.length);
+    box.onkeydown = (e) => {
+      if (e.key === 'Escape') closeNote(false);
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); closeNote(true); }
+    };
+    document.getElementById('cancelNote').onclick = () => closeNote(false);
+    document.getElementById('saveNote').onclick = () => closeNote(true);
+    document.getElementById('sendNone').onclick = () => redo(box.value);
+  }
+}
+
+function paintSelection() {
+  root.querySelectorAll('.contender').forEach((el) => {
+    const on = el.dataset.side === selected;
+    el.classList.toggle('sel', on);
+    const print = el.querySelector('.print');
+    const old = print.querySelector('.marker');
+    if (on && !old) {
+      print.insertAdjacentHTML('beforeend', markerSVG(print.offsetWidth, print.offsetHeight));
+      const svg = print.querySelector('.marker');
+      requestAnimationFrame(() => requestAnimationFrame(() => svg.classList.add('drawn')));
+    } else if (!on && old) {
+      old.remove();
+    }
+  });
+}
+
+function select(side) {
+  if (!item || tucked || finishing !== null) return;
+  selected = side;
+  if (!engaged) engaged = true;
+  paintSelection();
+  tellNative();
+  resetIdle();
+}
+
+// Paper in the air: the pair tossed off the desk, the next pair dealt in.
+function tossBoth(direction) {
+  root.querySelectorAll('.contender').forEach((el) => {
+    const box = el.getBoundingClientRect();
+    const print = el.querySelector('.print');
+    print.querySelector('.marker')?.classList.add('drawn');
+    const away = el.dataset.side === 'l' ? -1 : 1;
+    native({ type: 'leaf', html: print.outerHTML, x: box.x, y: box.y, w: box.width, direction: away * direction });
+  });
+}
+
+function commit() {
+  if (!item || tucked || finishing !== null || noteOpen || !selected) return;
+  const [a, b] = advance().pair;
+  const winner = selected === 'l' ? a : b;
+  tossBoth(1);
+  t.undo.push({ current: [...t.current], next: [...t.next], pos: t.pos, round: t.round });
+  t.matches.push({ round: t.round, a: item.frames[a].id, b: item.frames[b].id, winner: item.frames[winner].id });
+  t.next.push(winner);
+  t.pos += 2;
+  selected = null;
+  engaged = true;
+  const step = advance();
+  if (step.winner !== undefined) {
+    finishing = winner;
+    clearTimeout(idleTimer);
+    render();
+    tellNative();
+    sendTimer = setTimeout(send, UNDO_MS);
+    return;
+  }
+  render(true);
+  tellNative();
+  resetIdle();
+}
+
+function undo() {
+  if (!t?.undo.length || noteOpen) return;
+  clearTimeout(sendTimer);
+  finishing = null;
+  Object.assign(t, t.undo.pop());
+  t.matches.pop();
+  selected = null;
+  render(true);
+  tellNative();
+  resetIdle();
+}
+
+function openNote() {
+  if (finishing !== null || tucked) return;
+  noteOpen = true;
+  engaged = true;
+  clearTimeout(idleTimer);
+  tellNative();
+  native({ type: 'typing', on: true });
+  render();
+}
+
+function closeNote(save) {
+  if (save) note = document.getElementById('note').value.trim();
+  noteOpen = false;
+  native({ type: 'typing', on: false });
+  render();
+  tellNative();
+  resetIdle();
+}
+
+function finish() {
+  item = null; t = null; note = ''; finishing = null; engaged = false; selected = null; armed = false;
+  clearTimeout(idleTimer); clearTimeout(armTimer);
+  if (noteOpen) { noteOpen = false; native({ type: 'typing', on: false }); }
+  // Clear the cards and let go of the keys now; refresh only brings in the next pick if there is one.
+  render();
+  tellNative();
+  refresh();
+}
+
+async function answer(body) {
+  try {
+    await api('/api/answer', body);
+  } catch (error) {
+    console.error(error);
+  }
+  finish();
+}
+
+function send() {
+  answer({ id: item.id, action: 'pick', frameId: item.frames[finishing].id, note, matches: t.matches });
+}
+
+function redo(text) {
+  if (!item) return;
+  tossBoth(1);
+  answer({ id: item.id, action: 'redo', note: text });
+}
+
+function remove() {
+  if (!item) return;
+  tossBoth(1);
+  answer({ id: item.id, action: 'delete' });
+}
+
+window.curatorKey = (key) => {
+  if (key === 'bringBack') return setTucked(false);
+  if (tucked) return;
+  if (key === 'left') select('l');
+  if (key === 'right') select('r');
+  if (key === 'enter') commit();
+  if (key === 'undo') undo();
+  if (key === 'escape') setTucked(true);
+  if (key === 'noteAny' || key === 'noteBare') openNote();
+  if (key === 'deleteAny' || key === 'deleteBare') remove();
+};
+
+async function refresh() {
+  const s = await state();
+  const next = s.quick[0] || null;
+  waitingBehind = Math.max(s.quick.length - 1, 0);
+  if (next?.id !== item?.id) {
+    clearTimeout(sendTimer);
+    item = next;
+    t = next ? newTournament(next.frames) : null;
+    engaged = false; tucked = false; note = ''; finishing = null; selected = null;
+    if (noteOpen) { noteOpen = false; native({ type: 'typing', on: false }); }
+    render(next ? 'first' : false);
+    if (next) arm(); else { armed = false; tellNative(); }
+    resetIdle();
+  } else if (tucked) {
+    render();
+  }
+}
+
+window.curatorRefresh = refresh;
+refresh();
+</script>
+</body>
+</html>

@@ -94,8 +94,9 @@ function tellNative() {
     else if (armed || full) {
       // F works as soon as the cards are up: it's how you ask to look closer.
       keys = ['left', 'right', 'escape', 'noteAny', 'deleteAny', 'fullAny', 'fullBare'];
-      // Other plain keys are only taken once you're using this pick, so they can't catch your typing.
-      if (engaged || full) keys.push('enter', 'noteBare', 'deleteBare', 'undo');
+      // Other plain keys are only taken once you've pressed an arrow on this pick, full screen or not:
+      // an F typed into another app must never be followed by a ⌫ that deletes the pick.
+      if (engaged) keys.push('enter', 'noteBare', 'deleteBare', 'undo');
     }
   }
   native({ type: 'keys', keys });
@@ -149,7 +150,6 @@ function setFull(on) {
   if (on && tucked) { tucked = false; armed = true; }  // straight from the pill to full screen
   if (on === full) return;
   full = on;
-  if (on) engaged = true;
   render();
   tellNative();
   resetIdle();

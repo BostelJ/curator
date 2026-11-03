@@ -32,7 +32,7 @@ final class HTTPServer {
     private var listener: NWListener?
     private let handler: (Request) -> Response
     private(set) var port: UInt16 = 0
-    private let maxBody = 8 * 1024 * 1024
+    private let maxBody = 24 * 1024 * 1024  // room for a marked-up picture
 
     init(handler: @escaping (Request) -> Response) {
         self.handler = handler

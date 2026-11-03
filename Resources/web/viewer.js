@@ -66,7 +66,8 @@ async function renderThumbnail(url) {
 
 // A live view you can turn and zoom. Returns a function that stops it.
 export async function mount(container, url) {
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  // Keeps the last frame readable, so the view can be frozen to draw on.
+  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(window.devicePixelRatio);
   container.appendChild(renderer.domElement);
   const scene = new THREE.Scene();

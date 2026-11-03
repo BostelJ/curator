@@ -49,7 +49,7 @@ enum MCP {
         ],
         [
             "name": "curator_wait",
-            "description": "Wait for answers to cards. Returns as soon as any of the listed cards is answered, or with everything still pending after timeout_seconds; if still pending, call it again or carry on with other work. Answers: pick (with the winning file, the runner-up, and every match, which show what beat what), redo (none of these, usually with a note), keep, note, or delete (they threw this card away). Follow notes literally.",
+            "description": "Wait for answers to cards. Returns as soon as any of the listed cards is answered, or with everything still pending after timeout_seconds; if still pending, call it again or carry on with other work. Answers: pick (with the winning file, the runner-up, and every match, which show what beat what), redo (none of these, usually with a note), keep, note (sometimes with `markups`: pictures they drew red marker on to point at what the note means; open them), or delete (they threw this card away). Follow notes literally.",
             "inputSchema": [
                 "type": "object",
                 "properties": [

@@ -47,8 +47,14 @@ final class API {
                 let body = request.json
                 try store.answer(id: body["id"] as? String ?? "", action: body["action"] as? String ?? "",
                                  frameId: body["frameId"] as? String, note: body["note"] as? String,
-                                 matches: matches(body["matches"]))
+                                 matches: matches(body["matches"]), markups: body["markups"] as? [String])
                 return .json(["ok": true])
+            case ("POST", "/api/markup"):
+                let body = request.json
+                let raw = (body["png"] as? String ?? "").replacingOccurrences(of: "data:image/png;base64,", with: "")
+                guard let png = Data(base64Encoded: raw) else { return .error("png must be base64") }
+                let file = try store.saveMarkup(id: body["id"] as? String ?? "", frameId: body["frameId"] as? String ?? "", png: png)
+                return .json(["file": file])
             case ("POST", "/api/withdraw"):
                 try store.withdraw(id: request.json["id"] as? String ?? "")
                 return .json(["ok": true])
@@ -106,6 +112,9 @@ final class API {
         if let answer = item.answer {
             var a: [String: Any] = ["action": answer.action]
             if let note = answer.note { a["note"] = note }
+            if let markups = answer.markups, !markups.isEmpty {
+                a["markups"] = markups.map { store.path(of: $0) }
+            }
             if let frame = item.frames.first(where: { $0.id == answer.frameId }) {
                 a["chosen"] = ["label": frame.label ?? "", "path": store.path(of: frame.file)]
             }

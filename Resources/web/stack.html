@@ -27,6 +27,17 @@
   .viewer { position: absolute; inset: 0; overflow: hidden; background: #d9d5cc; }
   .viewer canvas { display: block; width: 100%; height: 100%; }
 
+  /* Marking up: a red marker over the picture, so a note can point at something. */
+  .pencil { position: absolute; top: 7px; left: 7px; z-index: 4; width: 30px; height: 30px; padding: 0; display: grid; place-items: center; border: 1.5px solid var(--black); background: var(--paper); }
+  .pencil svg { width: 16px; height: 16px; }
+  .pencil.on { background: var(--marker); border-color: var(--marker); color: #fff; }
+  #ink { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 3; pointer-events: none; }
+  #ink.drawing { pointer-events: auto; cursor: crosshair; }
+  .frozen { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #d9d5cc; }
+  .marks { display: flex; gap: 10px; align-items: center; margin-right: auto; font: 600 10px var(--mono); letter-spacing: .04em; color: var(--muted); }
+  .marks button { padding: 3px 8px; font-size: 11px; }
+  .thumb .dot { position: absolute; left: 3px; top: 3px; width: 7px; height: 7px; border-radius: 50%; background: var(--marker); z-index: 2; }
+
   .thumbs { display: flex; gap: 6px; margin-top: 8px; }
   .thumb { width: 56px; height: 42px; overflow: hidden; opacity: .55; cursor: default; flex: none; position: relative; border: 1.5px solid var(--black); }
   .thumb.on { opacity: 1; outline: 2px solid var(--marker); outline-offset: 1px; }
@@ -58,6 +69,10 @@ reportSize(root);
 let cards = [];
 let topId = null, big = false, noteOpen = false, shown = 0, busy = false;
 let stopViewer = null;
+// Marks, per image of the current card: strokes as points in 0..1 of the picture area,
+// and for a 3D model, the frozen view they were drawn on.
+let drawing = false, marks = new Map(), frozen = new Map();
+const PENCIL = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M10.8 2.2l3 3-8.6 8.6-3.7.7.7-3.7z"/><path d="M9.3 3.7l3 3"/></svg>';
 
 function stop3D() { stopViewer?.(); stopViewer = null; }
 
@@ -83,13 +98,16 @@ function slipHTML(rule) {
 function printHTML(item) {
   const frame = item.frames[shown] || item.frames[0];
   const thumbs = big && item.frames.length > 1
-    ? `<div class="thumbs">${item.frames.map((f, i) => `<div class="thumb ${i === shown ? 'on' : ''}" data-i="${i}">${frameHTML(f)}</div>`).join('')}</div>` : '';
-  const main = big && frame.kind === 'model'
+    ? `<div class="thumbs">${item.frames.map((f, i) => `<div class="thumb ${i === shown ? 'on' : ''}" data-i="${i}">${marks.get(i)?.length ? '<span class="dot"></span>' : ''}${frameHTML(f)}</div>`).join('')}</div>` : '';
+  const main = big && frozen.has(shown)
+    ? `<img class="frozen" src="${frozen.get(shown)}" alt="">`
+    : big && frame.kind === 'model'
     ? `<div class="viewer" id="viewer"></div>`
     : frameHTML(frame, { eager: true });
+  const ink = big ? `<button class="pencil ${drawing ? 'on' : ''}" id="pencil" title="Draw on it">${PENCIL}</button><canvas id="ink" class="${drawing ? 'drawing' : ''}"></canvas>` : '';
   return `<div class="card" id="card"><div class="print" id="sheet">
       <button class="toss" id="toss" title="Delete this card">×</button>
-      <div class="photo" id="main">${main}</div>
+      <div class="photo" id="main">${main}${ink}</div>
       ${thumbs}
       <div class="text">
         <div class="topline"><span class="project">${esc(item.project)}</span><span class="num">${item.pass ? `Pass ${item.pass}` : ''}${item.frames.length > 1 ? ` · ${big ? `image ${shown + 1} of ${item.frames.length}` : `${item.frames.length} images`}` : ''}</span></div>
@@ -97,8 +115,8 @@ function printHTML(item) {
         ${item.prompt ? `<div class="prompt">${esc(item.prompt)}</div>` : ''}
         ${item.replacesTitles ? `<div class="prompt">Keeping this replaces ${item.replacesTitles.map((t) => `“${esc(t)}”`).join(', ')} on the wall.</div>` : ''}
         ${noteOpen ? `<div class="notebox">
-            <textarea id="note" placeholder="Any changes? Goes to the agent word for word…"></textarea>
-            <div class="actions"><button id="cancel">Cancel</button><button class="primary" id="send">Send note</button></div>
+            <textarea id="note" placeholder="${drawing || markCount() ? 'Circle it on the picture, then say what to change…' : 'Any changes? Goes to the agent word for word…'}">${esc(draft)}</textarea>
+            <div class="actions">${markCount() ? `<span class="marks">${markCount()} mark${markCount() > 1 ? 's' : ''}<button id="undoMark">Undo</button><button id="clearMarks">Clear</button></span>` : ''}<button id="cancel">Cancel</button><button class="primary" id="send">Send note</button></div>
           </div>` : `<div class="actions">
             <button class="primary" id="keep">Keep<kbd>⌃⌥K</kbd></button>
             <button id="noteBtn">Note<kbd>${big ? 'N' : '⌃⌥N'}</kbd></button>
@@ -138,7 +156,8 @@ function render() {
   document.getElementById('main').onclick = () => { if (!big) { big = true; render(); } };
   root.querySelectorAll('.thumb').forEach((t) => { t.onclick = () => { shown = Number(t.dataset.i); render(); }; });
   const frame = item.frames[shown] || item.frames[0];
-  if (big && frame.kind === 'model') {
+  if (big) setUpInk(frame);
+  if (big && frame.kind === 'model' && !frozen.has(shown)) {
     import('./viewer.js').then(async ({ mount }) => {
       const holder = document.getElementById('viewer');
       if (holder) stopViewer = await mount(holder, media(frame.file));
@@ -153,12 +172,104 @@ function render() {
       if (e.key === 'Escape') closeNote();
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendNote(box.value); }
     };
+    box.oninput = () => { draft = box.value; };
     document.getElementById('cancel').onclick = closeNote;
     document.getElementById('send').onclick = () => sendNote(box.value);
+    document.getElementById('undoMark')?.addEventListener('click', () => { marks.get(shown)?.pop() || [...marks.values()].reverse().find((m) => m.length)?.pop(); render(); });
+    document.getElementById('clearMarks')?.addEventListener('click', () => { marks = new Map(); render(); });
   } else {
     document.getElementById('keep').onclick = keep;
     document.getElementById('noteBtn').onclick = openNote;
   }
+}
+
+let draft = '';
+const markCount = () => [...marks.values()].reduce((n, m) => n + m.length, 0);
+
+function setUpInk(frame) {
+  const canvas = document.getElementById('ink');
+  const area = document.getElementById('main');
+  if (!canvas) return;
+  const ratio = devicePixelRatio || 2;
+  const size = () => {
+    canvas.width = area.clientWidth * ratio;
+    canvas.height = area.clientHeight * ratio;
+    paint(canvas, marks.get(shown) || [], canvas.width, canvas.height);
+  };
+  size();
+  document.getElementById('pencil').onclick = (e) => { e.stopPropagation(); toggleDrawing(frame); };
+  let stroke = null;
+  const at = (e) => { const b = canvas.getBoundingClientRect(); return [(e.clientX - b.left) / b.width, (e.clientY - b.top) / b.height]; };
+  canvas.onpointerdown = (e) => {
+    if (!drawing) return;
+    e.preventDefault();
+    canvas.setPointerCapture(e.pointerId);
+    stroke = [at(e)];
+    if (!marks.has(shown)) marks.set(shown, []);
+    marks.get(shown).push(stroke);
+  };
+  canvas.onpointermove = (e) => {
+    if (!stroke) return;
+    stroke.push(at(e));
+    paint(canvas, marks.get(shown), canvas.width, canvas.height);
+  };
+  const end = () => { if (stroke) { stroke = null; render(); } };
+  canvas.onpointerup = end;
+  canvas.onpointercancel = end;
+}
+
+// A marker line: thick, round, a little translucent where it crosses itself, like the real thing.
+function paint(canvas, strokes, w, h, clear = true) {
+  const g = canvas.getContext('2d');
+  if (clear) g.clearRect(0, 0, w, h);
+  g.strokeStyle = 'rgba(229,57,31,.92)';
+  g.lineWidth = Math.max(4, Math.round(Math.min(w, h) * .012));
+  g.lineCap = 'round';
+  g.lineJoin = 'round';
+  for (const s of strokes) {
+    g.beginPath();
+    g.moveTo(s[0][0] * w, s[0][1] * h);
+    if (s.length === 1) g.lineTo(s[0][0] * w + .1, s[0][1] * h);
+    for (let i = 1; i < s.length - 1; i++) {
+      const mx = (s[i][0] + s[i + 1][0]) / 2, my = (s[i][1] + s[i + 1][1]) / 2;
+      g.quadraticCurveTo(s[i][0] * w, s[i][1] * h, mx * w, my * h);
+    }
+    if (s.length > 1) g.lineTo(s[s.length - 1][0] * w, s[s.length - 1][1] * h);
+    g.stroke();
+  }
+}
+
+// Drawing on a 3D model freezes the view you're looking at, so the marks stay on what you circled.
+function toggleDrawing(frame) {
+  drawing = !drawing;
+  if (drawing && frame.kind === 'model' && !frozen.has(shown)) {
+    const live = document.querySelector('#viewer canvas');
+    if (live) frozen.set(shown, live.toDataURL('image/png'));
+  }
+  if (drawing && !noteOpen) return openNote();
+  render();
+}
+
+// The picture as you saw it, with your marks on top, at double size.
+async function composite(index) {
+  const item = cards[0].data;
+  const frame = item.frames[index];
+  const area = document.getElementById('main');
+  const w = (area?.clientWidth || 600) * 2, h = (area?.clientHeight || 430) * 2;
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  const g = canvas.getContext('2d');
+  g.fillStyle = frame.kind === 'model' ? '#d9d5cc' : '#f1efe9';
+  g.fillRect(0, 0, w, h);
+  const source = frozen.get(index) || (frame.kind === 'model' ? (await import('./viewer.js').then((v) => v.thumbnail(media(frame.file)))) : media(frame.file));
+  const img = new Image();
+  img.src = source;
+  await img.decode();
+  const scale = Math.min(w / img.naturalWidth, h / img.naturalHeight);
+  const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
+  g.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+  paint(canvas, marks.get(index), w, h, false);
+  return canvas.toDataURL('image/png');
 }
 
 function openNote() {
@@ -171,6 +282,7 @@ function openNote() {
 
 function closeNote() {
   noteOpen = false;
+  drawing = false;
   native({ type: 'typing', on: false });
   render();
 }
@@ -194,6 +306,7 @@ async function leave(send) {
   }
   busy = false;
   topId = null; big = false; shown = 0;
+  resetMarks();
   refresh();
 }
 
@@ -203,10 +316,22 @@ function keep() {
   leave(() => api('/api/answer', { id: top.data.id, action: 'keep' }));
 }
 
-function sendNote(note) {
+async function sendNote(note) {
   const top = cards[0];
-  if (!note.trim() || top?.kind !== 'film') return;
-  leave(() => api('/api/answer', { id: top.data.id, action: 'note', note }));
+  if ((!note.trim() && !markCount()) || top?.kind !== 'film' || busy) return;
+  const files = [];
+  for (const [index, strokes] of marks) {
+    if (!strokes.length) continue;
+    try {
+      const png = await composite(index);
+      const saved = await api('/api/markup', { id: top.data.id, frameId: top.data.frames[index].id, png });
+      files.push(saved.file);
+    } catch (error) {
+      console.error(error);
+    }
+  }
+  const text = note.trim() || 'See my marks.';
+  leave(() => api('/api/answer', { id: top.data.id, action: 'note', note: text, markups: files }));
 }
 
 function remove() {
@@ -221,11 +346,13 @@ function answerRule(accept) {
   leave(() => api('/api/rule/answer', { id: top.data.id, accept }));
 }
 
+function resetMarks() { drawing = false; marks = new Map(); frozen = new Map(); draft = ''; }
+
 window.curatorKey = (key) => {
   if (key === 'keep') keep();
   if (key === 'noteAny' || key === 'noteBare') { big = true; openNote(); }
   if (key === 'deleteAny' || key === 'deleteBare') remove();
-  if (key === 'escape') { big = false; render(); }
+  if (key === 'escape') { big = false; drawing = false; render(); }
 };
 
 let lastCount = 0;
@@ -240,6 +367,7 @@ async function refresh() {
   if (nextTop !== topId) {
     topId = nextTop;
     big = false; shown = 0;
+    resetMarks();
     if (noteOpen) { noteOpen = false; native({ type: 'typing', on: false }); }
     render();
   } else if (!noteOpen && cards.length !== lastCount) {

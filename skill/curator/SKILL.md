@@ -16,7 +16,7 @@ The user doesn't stop to review. Cards float over whatever they're doing, they a
 5. **Act on the answer.**
    - `pick`: build from `answer.chosen.path`, with `revises` set to that card. `answer.runnerUp` and `answer.matches` show what lost to what: use them to see what they respond to, and borrow from the runner-up only if a note asks for it.
    - `redo`: none of them worked. Read the note and make a new quick pick, with `revises` set.
-   - `note`: follow it literally and send the next pass with `revises` set. Keep what they didn't mention.
+   - `note`: follow it literally and send the next pass with `revises` set. Keep what they didn't mention. If `answer.markups` is there, open every file: they drew red marker on the picture to point at exactly what the note is about.
    - `delete`: they threw the card away, at any stage. Stop work on it and don't resend it unless they ask.
    - `keep`: done, and it's on the board. Only a Keep is approval. Never describe something as approved or final before it.
 

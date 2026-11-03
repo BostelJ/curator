@@ -21,6 +21,7 @@ struct Answer: Codable {
     var note: String?
     var at: Double
     var matches: [Match]?     // a tournament's results, in the order they were played
+    var markups: [String]?    // marked-up pictures sent with a note, relative to the media folder
 }
 
 struct Item: Codable {
@@ -224,6 +225,20 @@ final class Store {
         return data.items.filter { $0.thread == thread && $0.stage == "refine" && $0.status != "withdrawn" }.count
     }
 
+    /// Saves a picture the user drew on, next to the card's own files.
+    func saveMarkup(id: String, frameId: String, png: Data) throws -> String {
+        guard let item = data.items.first(where: { $0.id == id }), item.status == "pending" else {
+            throw StoreError.message("that card isn't waiting for an answer")
+        }
+        guard let index = item.frames.firstIndex(where: { $0.id == frameId }) else {
+            throw StoreError.message("that picture isn't on this card")
+        }
+        guard png.starts(with: [0x89, 0x50, 0x4E, 0x47]) else { throw StoreError.message("markup must be a PNG") }
+        let name = String(format: "markup_%02d_%@.png", index + 1, String(UUID().uuidString.prefix(6)).lowercased())
+        try png.write(to: mediaDir.appendingPathComponent(id).appendingPathComponent(name))
+        return "\(id)/\(name)"
+    }
+
     func withdraw(id: String) throws {
         guard let index = data.items.firstIndex(where: { $0.id == id }) else {
             throw StoreError.message("no card with id \(id)")
@@ -235,7 +250,8 @@ final class Store {
 
     // MARK: Answering
 
-    func answer(id: String, action: String, frameId: String?, note: String?, matches: [Match]? = nil) throws {
+    func answer(id: String, action: String, frameId: String?, note: String?, matches: [Match]? = nil,
+                markups: [String]? = nil) throws {
         guard let index = data.items.firstIndex(where: { $0.id == id }) else {
             throw StoreError.message("no card with id \(id)")
         }
@@ -259,7 +275,8 @@ final class Store {
         }
         data.items[index].status = "answered"
         data.items[index].answer = Answer(action: action, frameId: frameId, note: cleanNote,
-                                          at: Date().timeIntervalSince1970, matches: matches)
+                                          at: Date().timeIntervalSince1970, matches: matches,
+                                          markups: markups?.filter { $0.hasPrefix(id + "/") }.nilIfEmpty)
         if action == "keep" || (action == "pick" && item.keepOnPick) {
             makeStrip(from: data.items[index])
         }
@@ -389,4 +406,8 @@ final class Store {
     }
 
     func path(of file: String) -> String { mediaDir.appendingPathComponent(file).path }
+}
+
+extension Array {
+    var nilIfEmpty: [Element]? { isEmpty ? nil : self }
 }

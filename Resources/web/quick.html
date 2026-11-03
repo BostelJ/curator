@@ -89,12 +89,13 @@ function advance() {
 function tellNative() {
   let keys = [];
   if (item && !noteOpen) {
-    if (tucked) keys = ['bringBack'];
+    if (tucked) keys = ['bringBack', 'fullAny'];
     else if (finishing !== null) keys = ['undo'];
     else if (armed || full) {
-      keys = ['left', 'right', 'escape', 'noteAny', 'deleteAny', 'fullAny'];
-      // Plain keys are only taken once you're using this pick, so they can't catch your typing.
-      if (engaged || full) keys.push('enter', 'noteBare', 'deleteBare', 'undo', 'fullBare');
+      // F works as soon as the cards are up: it's how you ask to look closer.
+      keys = ['left', 'right', 'escape', 'noteAny', 'deleteAny', 'fullAny', 'fullBare'];
+      // Other plain keys are only taken once you're using this pick, so they can't catch your typing.
+      if (engaged || full) keys.push('enter', 'noteBare', 'deleteBare', 'undo');
     }
   }
   native({ type: 'keys', keys });
@@ -144,7 +145,8 @@ function syncFull() {
 }
 
 function setFull(on) {
-  if (!item || tucked || finishing !== null) on = false;
+  if (!item || finishing !== null) on = false;
+  if (on && tucked) { tucked = false; armed = true; }  // straight from the pill to full screen
   if (on === full) return;
   full = on;
   if (on) engaged = true;
@@ -351,6 +353,7 @@ function remove() {
 
 window.curatorKey = (key) => {
   if (key === 'bringBack') return setTucked(false);
+  if (key === 'fullAny' && tucked) return setFull(true);
   if (tucked) return;
   if (key === 'left') select('l');
   if (key === 'right') select('r');

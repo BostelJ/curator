@@ -41,6 +41,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKSc
     }
 
     private func anotherCopyIsRunning() -> Bool {
+        // A copy with its own CURATOR_HOME (a test copy) has its own store and server, so it can run alongside.
+        if let custom = ProcessInfo.processInfo.environment["CURATOR_HOME"], !custom.isEmpty { return false }
         let mine = ProcessInfo.processInfo.processIdentifier
         return NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
             .contains { $0.processIdentifier != mine && !$0.isTerminated }
@@ -271,6 +273,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKSc
     @objc private func openGallery() {
         if galleryWindow == nil {
             let config = WKWebViewConfiguration()
+            config.mediaTypesRequiringUserActionForPlayback = []
             config.userContentController.add(self, name: "curator")
             let web = WKWebView(frame: .zero, configuration: config)
             if #available(macOS 13.3, *) { web.isInspectable = true }

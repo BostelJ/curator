@@ -17,6 +17,7 @@ struct Response {
     var status: Int = 200
     var contentType: String = "application/json"
     var body: Data = Data()
+    var headers: [String: String] = [:]
 
     static func json(_ value: Any, status: Int = 200) -> Response {
         let data = (try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])) ?? Data("{}".utf8)
@@ -110,16 +111,35 @@ final class HTTPServer {
     }
 
     private func write(_ response: Response, to connection: NWConnection) {
-        let reason = [200: "OK", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden",
-                      404: "Not Found", 413: "Too Large"][response.status] ?? "Status"
+        let reason = [200: "OK", 206: "Partial Content", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden",
+                      404: "Not Found", 413: "Too Large", 416: "Range Not Satisfiable"][response.status] ?? "Status"
+        let extra = response.headers.map { "\($0.key): \($0.value)\r\n" }.sorted().joined()
         let head = "HTTP/1.1 \(response.status) \(reason)\r\n"
             + "Content-Type: \(response.contentType)\r\n"
+            + extra
             + "Content-Length: \(response.body.count)\r\n"
             + "Cache-Control: no-store\r\n"
             + "Connection: close\r\n\r\n"
         var out = Data(head.utf8)
         out.append(response.body)
         connection.send(content: out, completion: .contentProcessed { _ in connection.cancel() })
+    }
+
+    /// "bytes=a-b", "bytes=a-" or "bytes=-n" as an inclusive range within the file. Only one range.
+    static func byteRange(_ header: String, size: Int) -> (Int, Int)? {
+        guard header.hasPrefix("bytes="), size > 0 else { return nil }
+        let spec = header.dropFirst("bytes=".count).split(separator: ",").first.map(String.init) ?? ""
+        let ends = spec.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false).map {
+            $0.trimmingCharacters(in: .whitespaces)
+        }
+        guard ends.count == 2 else { return nil }
+        if ends[0].isEmpty {
+            guard let n = Int(ends[1]), n > 0 else { return nil }
+            return (max(0, size - n), size - 1)
+        }
+        guard let start = Int(ends[0]), start < size else { return nil }
+        let end = ends[1].isEmpty ? size - 1 : min(Int(ends[1]) ?? -1, size - 1)
+        return end >= start ? (start, end) : nil
     }
 
     static func contentType(for ext: String) -> String {
@@ -133,6 +153,9 @@ final class HTTPServer {
         case "webp": return "image/webp"
         case "gif": return "image/gif"
         case "glb": return "model/gltf-binary"
+        case "mp4", "m4v": return "video/mp4"
+        case "mov": return "video/quicktime"
+        case "webm": return "video/webm"
         default: return "application/octet-stream"
         }
     }

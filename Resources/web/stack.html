@@ -24,6 +24,7 @@
   #main { cursor: zoom-in; }
   .pile.big #main { aspect-ratio: auto; height: 430px; cursor: default; }
   .pile.big #main .shot { object-fit: contain; background-color: #f1efe9; }
+  .pile.big #main video.shot { background-color: #111; }
   .viewer { position: absolute; inset: 0; overflow: hidden; background: #d9d5cc; }
   .viewer canvas { display: block; width: 100%; height: 100%; }
 
@@ -61,7 +62,7 @@
 <body>
 <div id="root"></div>
 <script type="module">
-import { api, state, media, frameHTML, fillModels, reportSize, native, esc } from './common.js';
+import { api, state, media, frameHTML, fillModels, reportSize, native, esc, runClips, clipBarHTML, paperHTML, stillOf } from './common.js';
 
 const root = document.getElementById('root');
 reportSize(root);
@@ -70,11 +71,13 @@ let cards = [];
 let topId = null, big = false, noteOpen = false, shown = 0, busy = false;
 let stopViewer = null;
 // Marks, per image of the current card: strokes as points in 0..1 of the picture area,
-// and for a 3D model, the frozen view they were drawn on.
-let drawing = false, marks = new Map(), frozen = new Map();
+// and for a 3D model or a clip, the frozen view they were drawn on (and for a clip, its moment).
+let drawing = false, marks = new Map(), frozen = new Map(), frozenAt = new Map();
+let stopClips = () => {};
 const PENCIL = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M10.8 2.2l3 3-8.6 8.6-3.7.7.7-3.7z"/><path d="M9.3 3.7l3 3"/></svg>';
 
-function stop3D() { stopViewer?.(); stopViewer = null; }
+function stop3D() { stopViewer?.(); stopViewer = null; stopClips(); stopClips = () => {}; }
+const noun = (frames, n) => (frames.every((f) => f.kind === 'video') ? 'clip' : 'image') + (n === 1 ? '' : 's');
 
 function behindHTML(n) {
   const peek = Math.min(n, 3);
@@ -103,14 +106,16 @@ function printHTML(item) {
     ? `<img class="frozen" src="${frozen.get(shown)}" alt="">`
     : big && frame.kind === 'model'
     ? `<div class="viewer" id="viewer"></div>`
-    : frameHTML(frame, { eager: true });
+    : frameHTML(frame, { eager: true, play: big ? 'sync' : 'loop' });
+  const clipBar = big && frame.kind === 'video' && !frozen.has(shown) ? clipBarHTML() : '';
   const ink = big ? `<button class="pencil ${drawing ? 'on' : ''}" id="pencil" title="Draw on it">${PENCIL}</button><canvas id="ink" class="${drawing ? 'drawing' : ''}"></canvas>` : '';
   return `<div class="card" id="card"><div class="print" id="sheet">
       <button class="toss" id="toss" title="Delete this card">×</button>
       <div class="photo" id="main">${main}${ink}</div>
+      ${clipBar}
       ${thumbs}
       <div class="text">
-        <div class="topline"><span class="project">${esc(item.project)}</span><span class="num">${item.pass ? `Pass ${item.pass}` : ''}${item.frames.length > 1 ? ` · ${big ? `image ${shown + 1} of ${item.frames.length}` : `${item.frames.length} images`}` : ''}</span></div>
+        <div class="topline"><span class="project">${esc(item.project)}</span><span class="num">${item.pass ? `Pass ${item.pass}` : ''}${item.frames.length > 1 ? ` · ${big ? `${noun(item.frames, 1)} ${shown + 1} of ${item.frames.length}` : `${item.frames.length} ${noun(item.frames, 2)}`}` : ''}${big && frozenAt.has(shown) ? ` · at ${frozenAt.get(shown).toFixed(2)}s` : ''}</span></div>
         <div class="name">${esc(item.title)}</div>
         ${item.prompt ? `<div class="prompt">${esc(item.prompt)}</div>` : ''}
         ${item.replacesTitles ? `<div class="prompt">Keeping this replaces ${item.replacesTitles.map((t) => `“${esc(t)}”`).join(', ')} on the wall.</div>` : ''}
@@ -157,6 +162,7 @@ function render() {
   root.querySelectorAll('.thumb').forEach((t) => { t.onclick = () => { shown = Number(t.dataset.i); render(); }; });
   const frame = item.frames[shown] || item.frames[0];
   if (big) setUpInk(frame);
+  if (big && frame.kind === 'video') stopClips = runClips(document.getElementById('sheet'), `${item.id}:${shown}`);
   if (big && frame.kind === 'model' && !frozen.has(shown)) {
     import('./viewer.js').then(async ({ mount }) => {
       const holder = document.getElementById('viewer');
@@ -239,12 +245,20 @@ function paint(canvas, strokes, w, h, clear = true) {
   }
 }
 
-// Drawing on a 3D model freezes the view you're looking at, so the marks stay on what you circled.
+// Drawing on a 3D model or a clip freezes the view you're looking at, so the marks stay on what you circled.
 function toggleDrawing(frame) {
   drawing = !drawing;
   if (drawing && frame.kind === 'model' && !frozen.has(shown)) {
     const live = document.querySelector('#viewer canvas');
     if (live) frozen.set(shown, live.toDataURL('image/png'));
+  }
+  if (drawing && frame.kind === 'video' && !frozen.has(shown)) {
+    const live = document.querySelector('#main video');
+    if (live && live.readyState >= 2) {
+      live.pause();
+      frozen.set(shown, stillOf(live));
+      frozenAt.set(shown, live.currentTime);
+    }
   }
   if (drawing && !noteOpen) return openNote();
   render();
@@ -259,9 +273,12 @@ async function composite(index) {
   const canvas = document.createElement('canvas');
   canvas.width = w; canvas.height = h;
   const g = canvas.getContext('2d');
-  g.fillStyle = frame.kind === 'model' ? '#d9d5cc' : '#f1efe9';
+  g.fillStyle = frame.kind === 'model' ? '#d9d5cc' : frame.kind === 'video' ? '#111' : '#f1efe9';
   g.fillRect(0, 0, w, h);
-  const source = frozen.get(index) || (frame.kind === 'model' ? (await import('./viewer.js').then((v) => v.thumbnail(media(frame.file)))) : media(frame.file));
+  const source = frozen.get(index)
+    || (frame.kind === 'model' ? (await import('./viewer.js').then((v) => v.thumbnail(media(frame.file))))
+    : frame.kind === 'video' ? await firstFrame(media(frame.file))
+    : media(frame.file));
   const img = new Image();
   img.src = source;
   await img.decode();
@@ -270,6 +287,18 @@ async function composite(index) {
   g.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
   paint(canvas, marks.get(index), w, h, false);
   return canvas.toDataURL('image/png');
+}
+
+// A clip's opening frame, for marks made before it was frozen (which shouldn't happen, but just in case).
+function firstFrame(url) {
+  return new Promise((resolve, reject) => {
+    const v = document.createElement('video');
+    v.muted = true;
+    v.preload = 'auto';
+    v.onloadeddata = () => { try { resolve(stillOf(v)); } catch (e) { reject(e); } };
+    v.onerror = () => reject(new Error('clip did not load'));
+    v.src = url;
+  });
 }
 
 function openNote() {
@@ -295,7 +324,7 @@ async function leave(send) {
   if (card) {
     const box = card.getBoundingClientRect();
     const paper = document.getElementById('sheet') || card;
-    native({ type: 'leaf', html: paper.outerHTML, x: box.x, y: box.y, w: box.width, direction: -1 });
+    native({ type: 'leaf', html: paperHTML(paper), x: box.x, y: box.y, w: box.width, direction: -1 });
   }
   root.innerHTML = '';
   if (noteOpen) { noteOpen = false; native({ type: 'typing', on: false }); }
@@ -324,7 +353,7 @@ async function sendNote(note) {
     if (!strokes.length) continue;
     try {
       const png = await composite(index);
-      const saved = await api('/api/markup', { id: top.data.id, frameId: top.data.frames[index].id, png });
+      const saved = await api('/api/markup', { id: top.data.id, frameId: top.data.frames[index].id, png, time: frozenAt.get(index) });
       files.push(saved.file);
     } catch (error) {
       console.error(error);
@@ -346,7 +375,7 @@ function answerRule(accept) {
   leave(() => api('/api/rule/answer', { id: top.data.id, accept }));
 }
 
-function resetMarks() { drawing = false; marks = new Map(); frozen = new Map(); draft = ''; }
+function resetMarks() { drawing = false; marks = new Map(); frozen = new Map(); frozenAt = new Map(); draft = ''; }
 
 window.curatorKey = (key) => {
   if (key === 'keep') keep();

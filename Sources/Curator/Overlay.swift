@@ -41,6 +41,7 @@ final class Overlay: NSObject, WKScriptMessageHandler {
                              styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: false)
         let config = WKWebViewConfiguration()
         config.suppressesIncrementalRendering = false
+        config.mediaTypesRequiringUserActionForPlayback = []  // clips play by themselves, muted
         web = FirstClickWebView(frame: .zero, configuration: config)
         super.init()
         config.userContentController.add(self, name: "curator")

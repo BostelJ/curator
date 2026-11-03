@@ -4,7 +4,7 @@ struct Frame: Codable {
     var id: String
     var label: String?
     var file: String          // "<itemId>/<name>", relative to the media folder
-    var kind: String          // "image" or "model"
+    var kind: String          // "image", "model" or "video"
 }
 
 /// One head-to-head in a quick pick tournament, by frame id.
@@ -89,6 +89,11 @@ enum StoreError: LocalizedError {
 final class Store {
     static let viewableImages: Set<String> = ["png", "jpg", "jpeg", "webp", "gif"]
     static let viewableModels: Set<String> = ["glb"]
+    static let viewableVideos: Set<String> = ["mp4", "mov", "m4v", "webm"]
+
+    static func kind(of ext: String) -> String {
+        viewableModels.contains(ext) ? "model" : viewableVideos.contains(ext) ? "video" : "image"
+    }
 
     let home: URL
     var mediaDir: URL { home.appendingPathComponent("media") }
@@ -182,8 +187,9 @@ final class Store {
                 throw StoreError.message("file not found: \(entry.path)")
             }
             let ext = URL(fileURLWithPath: entry.path).pathExtension.lowercased()
-            guard Store.viewableImages.contains(ext) || Store.viewableModels.contains(ext) else {
-                throw StoreError.message("can't show .\(ext) files (\(entry.path)). Send png, jpg, webp, gif or glb.")
+            guard Store.viewableImages.contains(ext) || Store.viewableModels.contains(ext)
+                    || Store.viewableVideos.contains(ext) else {
+                throw StoreError.message("can't show .\(ext) files (\(entry.path)). Send png, jpg, webp, gif, glb, mp4, mov or webm.")
             }
         }
 
@@ -204,7 +210,7 @@ final class Store {
             }
             let ext = source.pathExtension.lowercased()
             frames.append(Frame(id: newId("frame"), label: entry.label, file: "\(id)/\(stored)",
-                                kind: Store.viewableModels.contains(ext) ? "model" : "image"))
+                                kind: Store.kind(of: ext)))
         }
 
         let item = Item(id: id, project: parent?.project ?? name, stage: stage, title: title, prompt: prompt,
@@ -226,7 +232,8 @@ final class Store {
     }
 
     /// Saves a picture the user drew on, next to the card's own files.
-    func saveMarkup(id: String, frameId: String, png: Data) throws -> String {
+    /// For a clip, `time` is the moment it was paused on to draw, and goes in the file name.
+    func saveMarkup(id: String, frameId: String, png: Data, time: Double? = nil) throws -> String {
         guard let item = data.items.first(where: { $0.id == id }), item.status == "pending" else {
             throw StoreError.message("that card isn't waiting for an answer")
         }
@@ -234,7 +241,8 @@ final class Store {
             throw StoreError.message("that picture isn't on this card")
         }
         guard png.starts(with: [0x89, 0x50, 0x4E, 0x47]) else { throw StoreError.message("markup must be a PNG") }
-        let name = String(format: "markup_%02d_%@.png", index + 1, String(UUID().uuidString.prefix(6)).lowercased())
+        let at = time.map { String(format: "_at_%.2fs", max(0, $0)) } ?? ""
+        let name = String(format: "markup_%02d%@_%@.png", index + 1, at, String(UUID().uuidString.prefix(6)).lowercased())
         try png.write(to: mediaDir.appendingPathComponent(id).appendingPathComponent(name))
         return "\(id)/\(name)"
     }

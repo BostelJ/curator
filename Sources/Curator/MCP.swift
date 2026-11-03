@@ -17,7 +17,7 @@ enum MCP {
                     "prompt": ["type": "string", "description": "Optional one-line question or context."],
                     "options": [
                         "type": "array",
-                        "description": "2-16 options. Each is a png, jpg, webp, gif or glb, with an absolute path. 4 or 8 make a clean bracket.",
+                        "description": "2-16 options. Each is a png, jpg, webp, gif, glb, or a video clip (mp4, mov, webm), with an absolute path. Clips in a match play in sync, so animations compare beat for beat. 4 or 8 make a clean bracket.",
                         "items": fileSchema,
                     ],
                     "revises": ["type": "string", "description": "Card id this follows, to stay in the same thread (for example a second quick pick after 'none of these')."],
@@ -38,7 +38,7 @@ enum MCP {
                     "prompt": ["type": "string", "description": "Optional one-line question, or what changed in this pass."],
                     "files": [
                         "type": "array",
-                        "description": "This pass: renders and/or a glb, with absolute paths. Put the one that best shows the asset first.",
+                        "description": "This pass: renders, a glb and/or video clips (mp4, mov, webm), with absolute paths. Put the one that best shows the asset first.",
                         "items": fileSchema,
                     ],
                     "replaces": ["type": "array", "items": ["type": "string"], "description": "Strip ids from curator_board that this makes stale. If they keep this card, those strips come off the wall. Earlier Keeps on the same revises road are replaced automatically, so don't list those."],
@@ -49,7 +49,7 @@ enum MCP {
         ],
         [
             "name": "curator_wait",
-            "description": "Wait for answers to cards. Returns as soon as any of the listed cards is answered, or with everything still pending after timeout_seconds; if still pending, call it again or carry on with other work. Answers: pick (with the winning file, the runner-up, and every match, which show what beat what), redo (none of these, usually with a note), keep, note (sometimes with `markups`: pictures they drew red marker on to point at what the note means; open them), or delete (they threw this card away). Follow notes literally.",
+            "description": "Wait for answers to cards. Returns as soon as any of the listed cards is answered, or with everything still pending after timeout_seconds; if still pending, call it again or carry on with other work. Answers: pick (with the winning file, the runner-up, and every match, which show what beat what), redo (none of these, usually with a note), keep, note (sometimes with `markups`: pictures they drew red marker on to point at what the note means; open them. On a clip, the file name says the moment, like markup_01_at_1.40s_ab12cd.png), or delete (they threw this card away). Follow notes literally.",
             "inputSchema": [
                 "type": "object",
                 "properties": [

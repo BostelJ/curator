@@ -31,7 +31,7 @@ final class API {
         guard request.query["token"] == token || request.headers["x-curator-token"] == token else {
             return .error("unauthorized", status: 401)
         }
-        if request.path.hasPrefix("/media/") { return serveMedia(request.path) }
+        if request.path.hasPrefix("/media/") { return serveMedia(request.path, range: request.headers["range"]) }
 
         do {
             switch (request.method, request.path) {
@@ -53,7 +53,8 @@ final class API {
                 let body = request.json
                 let raw = (body["png"] as? String ?? "").replacingOccurrences(of: "data:image/png;base64,", with: "")
                 guard let png = Data(base64Encoded: raw) else { return .error("png must be base64") }
-                let file = try store.saveMarkup(id: body["id"] as? String ?? "", frameId: body["frameId"] as? String ?? "", png: png)
+                let file = try store.saveMarkup(id: body["id"] as? String ?? "", frameId: body["frameId"] as? String ?? "", png: png,
+                                              time: (body["time"] as? NSNumber)?.doubleValue)
                 return .json(["file": file])
             case ("POST", "/api/withdraw"):
                 try store.withdraw(id: request.json["id"] as? String ?? "")
@@ -201,16 +202,43 @@ final class API {
         contents(of: webRoot, relative: String(path.dropFirst("/ui/".count)))
     }
 
-    private func serveMedia(_ path: String) -> Response {
-        contents(of: store.mediaDir, relative: String(path.dropFirst("/media/".count)))
+    private func serveMedia(_ path: String, range: String?) -> Response {
+        guard let file = locate(in: store.mediaDir, relative: String(path.dropFirst("/media/".count))) else {
+            return .error("not found", status: 404)
+        }
+        return contents(of: file, range: range)
+    }
+
+    private func locate(in root: URL, relative: String) -> URL? {
+        let parts = relative.split(separator: "/").map(String.init)
+        guard !parts.isEmpty, !parts.contains(".."), !parts.contains(".") else { return nil }
+        let file = parts.reduce(root) { $0.appendingPathComponent($1) }.standardizedFileURL
+        guard file.path.hasPrefix(root.standardizedFileURL.path + "/") else { return nil }
+        return file
     }
 
     private func contents(of root: URL, relative: String) -> Response {
-        let parts = relative.split(separator: "/").map(String.init)
-        guard !parts.isEmpty, !parts.contains(".."), !parts.contains(".") else { return .error("not found", status: 404) }
-        let file = parts.reduce(root) { $0.appendingPathComponent($1) }.standardizedFileURL
-        guard file.path.hasPrefix(root.standardizedFileURL.path + "/"),
-              let data = try? Data(contentsOf: file) else { return .error("not found", status: 404) }
-        return Response(contentType: HTTPServer.contentType(for: file.pathExtension), body: data)
+        guard let file = locate(in: root, relative: relative) else { return .error("not found", status: 404) }
+        return contents(of: file, range: nil)
+    }
+
+    /// Serves a file, or the byte range asked for. WebKit only plays a video it can fetch in ranges.
+    private func contents(of file: URL, range: String?) -> Response {
+        let type = HTTPServer.contentType(for: file.pathExtension)
+        guard let size = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? NSNumber)?.intValue,
+              let handle = try? FileHandle(forReadingFrom: file) else { return .error("not found", status: 404) }
+        defer { try? handle.close() }
+        let ranges = ["Accept-Ranges": "bytes"]
+        guard let range, let (start, end) = HTTPServer.byteRange(range, size: size) else {
+            if range != nil {
+                return Response(status: 416, contentType: type, headers: ["Content-Range": "bytes */\(size)"])
+            }
+            let data = (try? handle.readToEnd()) ?? Data()
+            return Response(contentType: type, body: data, headers: ranges)
+        }
+        try? handle.seek(toOffset: UInt64(start))
+        let data = (try? handle.read(upToCount: end - start + 1)) ?? Data()
+        return Response(status: 206, contentType: type, body: data,
+                        headers: ranges.merging(["Content-Range": "bytes \(start)-\(start + data.count - 1)/\(size)"]) { a, _ in a })
     }
 }

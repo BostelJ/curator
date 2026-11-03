@@ -66,6 +66,10 @@
   #light button.take:hover { color: var(--marker); border-color: var(--marker); }
   .l-main { position: relative; min-height: 0; display: grid; place-items: center; }
   .l-main img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+  .l-main.clip { display: flex; flex-direction: column; align-items: center; }
+  .l-main.clip video { flex: 1; min-height: 0; width: 100%; object-fit: contain; display: block; }
+  .l-main.clip .clipbar { width: min(720px, 100%); background: transparent; border-color: rgba(251,250,246,.4); box-shadow: none; }
+  .l-main.clip .clip-time { color: rgba(251,250,246,.65); }
   .l-main .view3d { position: absolute; inset: 0; overflow: hidden; }
   .l-main canvas { display: block; width: 100%; height: 100%; }
   .l-road { display: flex; align-items: flex-end; gap: 10px; overflow-x: auto; padding: 3px; }
@@ -83,11 +87,11 @@
 <main id="main"></main>
 <div id="light"></div>
 <script type="module">
-import { api, state, media, frameHTML, fillModels, esc } from './common.js';
+import { api, state, media, frameHTML, fillModels, esc, runClips, clipBarHTML } from './common.js';
 
 const main = document.getElementById('main'), light = document.getElementById('light');
 let current = localStorage.getItem('project');
-let data = null, stopViewer = null, shelfOpen = false, openStrip = null, openFrame = 0;
+let data = null, stopViewer = null, stopClips = () => {}, shelfOpen = false, openStrip = null, openFrame = 0;
 
 const when = (t) => new Date(t * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
@@ -126,7 +130,7 @@ function printHTML(s, style) {
   const label = roadLabel(s);
   const passes = label && label !== '1 pass' ? `<span class="num">${label}</span>` : '';
   return `<div class="held" data-strip="${s.id}" style="${style};transform:rotate(${tilt(s.id).toFixed(1)}deg)">
-    <div class="print"><div class="photo">${frameHTML(finalOf(s))}</div>
+    <div class="print"><div class="photo">${frameHTML(finalOf(s), { play: 'loop' })}</div>
     <div class="caption"><span class="label">${esc(s.title)}</span>${passes}</div></div></div>`;
 }
 
@@ -202,6 +206,8 @@ async function openLight(id) {
 async function drawLight() {
   stopViewer?.();
   stopViewer = null;
+  stopClips();
+  stopClips = () => {};
   const strip = data.strips.find((s) => s.id === openStrip);
   if (!strip) return closeLight();
   const frame = strip.frames[openFrame];
@@ -212,13 +218,17 @@ async function drawLight() {
       <span class="grow"></span>
       <button class="take" id="take">Take down</button><button id="close">Close<kbd>esc</kbd></button>
     </div>
-    <div class="l-main" id="lmain">${frame.kind === 'model' ? '<div class="view3d" id="view3d"></div>' : `<img src="${esc(media(frame.file))}" alt="">`}</div>
+    <div class="l-main ${frame.kind === 'video' ? 'clip' : ''}" id="lmain">${frame.kind === 'model' ? '<div class="view3d" id="view3d"></div>'
+      : frame.kind === 'video' ? `<video src="${esc(media(frame.file))}" muted playsinline disablepictureinpicture data-sync preload="auto"></video>${clipBarHTML()}`
+      : `<img src="${esc(media(frame.file))}" alt="">`}</div>
     <div class="l-road">
       ${(() => { const labels = stepLabels(strip); return strip.frames.map((f, i) => `<div class="step ${i === openFrame ? 'on' : ''}" data-i="${i}"><div class="photo">${frameHTML(f)}</div><span class="num">${labels[i]}</span></div>`).join(''); })()}
       ${strip.notes.length ? `<div class="l-notes">${strip.notes.map((n) => `<div>“${esc(n)}”</div>`).join('')}</div>` : ''}
     </div>`;
   light.classList.add('on');
+  main.querySelectorAll('video').forEach((v) => v.pause()); // the wall rests while a print is open
   fillModels(light);
+  if (frame.kind === 'video') stopClips = runClips(document.getElementById('lmain'), `${strip.id}:${openFrame}`);
   document.getElementById('close').onclick = closeLight;
   document.getElementById('take').onclick = async () => { closeLight(); await api('/api/strip/remove', { id: strip.id }); };
   light.querySelectorAll('.step').forEach((el) => { el.onclick = () => { openFrame = Number(el.dataset.i); drawLight(); }; });
@@ -232,9 +242,12 @@ async function drawLight() {
 function closeLight() {
   stopViewer?.();
   stopViewer = null;
+  stopClips();
+  stopClips = () => {};
   openStrip = null;
   light.classList.remove('on');
   light.innerHTML = '';
+  main.querySelectorAll('video').forEach((v) => v.play().catch(() => {}));
 }
 addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLight(); });
 let sizeTimer;

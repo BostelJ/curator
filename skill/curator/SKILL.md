@@ -11,7 +11,7 @@ The user doesn't stop to review. Cards float over whatever they're doing, they a
 
 1. **Read the board first.** `curator_board` before any visual pass: accepted rules are binding, declined rules are settled, recent tournaments show what beat what, and kept work (open the files) shows the bar. Use the same project name each time.
 2. **Quick pick, to set a direction.** `curator_quick_pick` runs a head-to-head tournament: two options at a time, winners advance until one is left. Send 2-16 options (4 or 8 make a clean bracket) that are really different in structure, silhouette or idea, not small tweaks. Rough is good: concepts, ideas or blockouts. Use the same camera for all so they compare fairly. Label each in a few words.
-3. **Refine, inside that direction.** `curator_refine` with a real pass ("here's your modeled house, any changes?"). Put the most telling view first; for a model, send the `.glb` so they can turn it and zoom in, plus renders if angles matter. Review in stages when it helps: main form, then attachments, then details.
+3. **Refine, inside that direction.** `curator_refine` with a real pass ("here's your modeled house, any changes?"). Put the most telling view first; for a model, send the `.glb` so they can turn it and zoom in, plus renders if angles matter; for motion, send a clip. Review in stages when it helps: main form, then attachments, then details.
 4. **Keep working while you wait.** Send cards, then `curator_wait` with their ids. If they're still pending when it returns, do other useful work or call it again. Never ask in chat for an answer a card is waiting on.
 5. **Act on the answer.**
    - `pick`: build from `answer.chosen.path`, with `revises` set to that card. `answer.runnerUp` and `answer.matches` show what lost to what: use them to see what they respond to, and borrow from the runner-up only if a note asks for it.
@@ -43,7 +43,16 @@ When Keeps and notes show a repeated pattern, propose it with `curator_propose_r
 - Check your own work first. Look at every render from all sides and fix what you find, so their attention goes on taste rather than your bugs.
 - One idea per card. Send only what needs a decision.
 - Titles are a few words. `prompt` is one line, or leave it out.
-- Files are copied when sent, so temporary paths are fine. Formats: png, jpg, webp, gif, glb. Render other formats (fbx, blend) to one of these first.
+- Files are copied when sent, so temporary paths are fine. Formats: png, jpg, webp, gif, glb, and video clips (mp4, mov, webm). Render other formats (fbx, blend) to one of these first.
+
+## Clips (animation, motion, timing)
+
+Send short video clips to compare animations, camera moves, effects or UI motion. In a quick pick the two clips of each match play from one clock: same start frame, the shorter one holds its last frame until the longer finishes, then both loop. The user can pause, scrub, step a frame and slow to ½× or ¼×.
+
+- Make the clips in a match the same length, framing and camera, starting on the same beat, so the only difference is the motion being judged. Keep them short (1-6 s) and H.264 mp4 at screen size.
+- Label what differs ("Snappy, 2 bounces", "Floaty, ease out"), since they watch rather than read.
+- A markup on a clip is a still of the moment they paused on, and its file name says when, like `markup_01_at_1.40s_ab12cd.png`. Work out what happens at that time in your clip.
+- You can't watch a video file: to check your own clip or a kept one, look at frames from it (for example with ffmpeg, or from the frames you rendered it from).
 
 ## If it isn't available
 

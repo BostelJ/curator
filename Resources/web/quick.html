@@ -35,7 +35,7 @@
 <body>
 <div id="root"></div>
 <script type="module">
-import { api, state, frameHTML, fillModels, markerSVG, reportSize, native, esc } from './common.js';
+import { api, state, frameHTML, fillModels, markerSVG, reportSize, native, esc, runClips, clipBarHTML, paperHTML } from './common.js';
 
 const root = document.getElementById('root');
 reportSize(root);
@@ -49,6 +49,7 @@ let t = null;               // the tournament
 let armed = false, engaged = false, tucked = false, noteOpen = false, note = '';
 let selected = null, finishing = null;
 let idleTimer = null, armTimer = null, sendTimer = null;
+let stopClips = () => {};
 
 function shuffle(list) {
   const out = [...list];
@@ -114,13 +115,15 @@ function contender(index, side, how) {
   return `<div class="contender ${how === 'first' ? 'first' : how ? 'in-' + side : ''}" data-i="${index}" data-side="${side}">
     <div class="print">
       <button class="toss" title="Delete this pick">×</button>
-      <div class="photo">${frameHTML(frame, { eager: true })}</div>
+      <div class="photo">${frameHTML(frame, { eager: true, play: 'sync' })}</div>
       <div class="caption"><span class="label">${esc(frame.label || '')}</span></div>
     </div>
   </div>`;
 }
 
 function render(how = false) {
+  stopClips();
+  stopClips = () => {};
   if (!item) { root.innerHTML = ''; return; }
   if (tucked) {
     const n = waitingBehind + 1;
@@ -134,12 +137,15 @@ function render(how = false) {
   const [a, b] = advance().pair;
   root.innerHTML = `
     <div class="ring">${contender(a, 'l', how)}${contender(b, 'r', how)}</div>
+    ${[a, b].some((i) => item.frames[i].kind === 'video') ? clipBarHTML() : ''}
     ${noteOpen ? `<div class="notebox">
       <div class="about"><b>${esc(item.title)}</b>${item.prompt ? ' · ' + esc(item.prompt) : ''}${item.replacesTitles ? ` · Replaces ${item.replacesTitles.map((t) => `“${esc(t)}”`).join(', ')}` : ''}</div>
       <textarea id="note" placeholder="Goes to the agent word for word…">${esc(note)}</textarea>
       <div class="row"><button id="cancelNote">Cancel</button><button id="sendNone">None of these, redo</button><button class="primary" id="saveNote">Keep choosing</button></div>
     </div>` : ''}`;
   fillModels(root);
+  // The two clips of a match play from one clock, so animations compare beat for beat.
+  stopClips = runClips(root, `${item.id}:${a}:${b}`);
   root.querySelectorAll('.contender').forEach((el) => {
     el.onclick = () => { selected = el.dataset.side; paintSelection(); commit(); };
     el.querySelector('.toss').onclick = (e) => { e.stopPropagation(); remove(); };
@@ -191,7 +197,7 @@ function tossBoth(direction) {
     const print = el.querySelector('.print');
     print.querySelector('.marker')?.classList.add('drawn');
     const away = el.dataset.side === 'l' ? -1 : 1;
-    native({ type: 'leaf', html: print.outerHTML, x: box.x, y: box.y, w: box.width, direction: away * direction });
+    native({ type: 'leaf', html: paperHTML(print), x: box.x, y: box.y, w: box.width, direction: away * direction });
   });
 }
 

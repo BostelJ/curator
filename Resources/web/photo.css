@@ -21,6 +21,18 @@ html, body { margin: 0; background: transparent; font: 13px -apple-system, "SF P
 .shot { display: block; width: 100%; height: 100%; object-fit: cover; background: #d9d5cc center / cover no-repeat; }
 .shot.model.broken::after { content: "couldn't load model"; position: absolute; inset: 0; display: grid; place-items: center; font: 11px var(--mono); color: #555; }
 .tag-3d { position: absolute; top: 6px; right: 6px; font: 600 9px var(--mono); padding: 2px 5px; color: var(--paper); background: var(--black); }
+video.shot { object-fit: contain; background: #111; }
+.tag-clip { z-index: 2; pointer-events: none; }
+
+/* One bar that plays, pauses, steps, scrubs and slows every clip on the card together. */
+.clipbar { display: flex; align-items: center; gap: 5px; margin-top: 10px; padding: 6px 8px; background: var(--paper); border: 1.5px solid var(--black); box-shadow: var(--lift); }
+.print .clipbar { box-shadow: none; margin-top: 8px; padding: 4px 6px; }
+.clipbar button { min-width: 28px; height: 24px; padding: 0 7px; display: inline-grid; place-items: center; font-size: 14px; line-height: 1; }
+.clipbar button svg { width: 11px; height: 11px; }
+.clipbar [data-c=rate] { min-width: 34px; font-size: 11px; }
+.clipbar input[type=range] { flex: 1; min-width: 60px; margin: 0 4px; accent-color: var(--marker); }
+.clipbar .clip-time { font: 600 10px var(--mono); color: var(--muted); min-width: 92px; text-align: right; white-space: nowrap; }
+
 .caption { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; min-height: 64px; padding: 15px 3px 12px; }
 .label { font: 400 20px/1.05 var(--hand); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .num { font: 600 10px var(--mono); letter-spacing: .04em; color: var(--muted); white-space: nowrap; }

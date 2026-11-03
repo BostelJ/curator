@@ -44,9 +44,10 @@ Curator only takes a key while it needs it, because a held key is taken from the
 
 | When | Keys |
 |---|---|
-| A quick pick is showing | ← → choose · Esc look later · ⌃⌥N note · ⌃⌥⌫ delete |
-| Once you've started on it | Return commit · N note · ⌫ delete · ⌃⌥Z undo |
-| A refine card is waiting | ⌃⌥K Keep · ⌃⌥N note · ⌃⌥⌫ delete (enlarged: N, ⌫, Esc) |
+| A quick pick is showing | ← → choose · Esc look later · ⌃⌥N note · ⌃⌥⌫ delete · ⌃⌥F full screen |
+| Once you've started on it | Return commit · N note · ⌫ delete · ⌃⌥Z undo · F full screen |
+| A refine card is waiting | ⌃⌥K Keep · ⌃⌥N note · ⌃⌥⌫ delete · ⌃⌥F full screen (enlarged: N, ⌫, Esc, F) |
+| Full screen | Everything above with plain keys · ← → between a card's images · F or Esc back |
 | A pick has tucked away | ⌃⌥P bring it back |
 | Always | ⌃⌥G art gallery |
 

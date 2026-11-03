@@ -54,6 +54,18 @@
   .notebox { margin-top: 9px; }
   .notebox .actions { justify-content: flex-end; }
 
+  /* F: the card up close, over the whole screen. */
+  #root.full { inset: 0; padding: 0; display: grid; place-items: center; background: rgba(17,16,16,.94); }
+  .pile.full { width: min(calc(100vw - 160px), calc((100vh - 80px) * 1.45)); height: calc(100vh - 80px); }
+  .pile.full .behind { display: none; }
+  .pile.full .card, .pile.full .print { height: 100%; }
+  .pile.full .print { display: flex; flex-direction: column; }
+  .pile.full #main { flex: 1; min-height: 0; height: auto; }
+  .pile.full .name { font-size: 30px; }
+  .pile.full .thumb { width: 84px; height: 63px; }
+  .fullhint { position: fixed; left: 0; right: 0; bottom: 12px; text-align: center; font: 600 13px var(--mono); letter-spacing: .06em; color: rgba(251,250,246,.5); pointer-events: none; }
+  .fullhint kbd { margin: 0 2px 0 0; opacity: .9; }
+
   .slip { padding: 14px 15px 13px; background: var(--paper); box-shadow: var(--lift); border: 2px solid var(--black); }
   .slip .rule { font: 400 22px/1.2 var(--hand); margin: 7px 0 6px; }
   .slip .why { font-size: 12px; line-height: 1.35; color: var(--muted); }
@@ -65,7 +77,7 @@
 import { api, state, media, frameHTML, fillModels, reportSize, native, esc, runClips, clipBarHTML, paperHTML, stillOf } from './common.js';
 
 const root = document.getElementById('root');
-reportSize(root);
+const sendSize = reportSize(root);
 
 let cards = [];
 let topId = null, big = false, noteOpen = false, shown = 0, busy = false;
@@ -74,6 +86,7 @@ let stopViewer = null;
 // and for a 3D model or a clip, the frozen view they were drawn on (and for a clip, its moment).
 let drawing = false, marks = new Map(), frozen = new Map(), frozenAt = new Map();
 let stopClips = () => {};
+let full = false, sentFull = false, bigBeforeFull = false, inkWatch = null;
 const PENCIL = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M10.8 2.2l3 3-8.6 8.6-3.7.7.7-3.7z"/><path d="M9.3 3.7l3 3"/></svg>';
 
 function stop3D() { stopViewer?.(); stopViewer = null; stopClips(); stopClips = () => {}; }
@@ -126,7 +139,7 @@ function printHTML(item) {
             <button class="primary" id="keep">Keep<kbd>⌃⌥K</kbd></button>
             <button id="noteBtn">Note<kbd>${big ? 'N' : '⌃⌥N'}</kbd></button>
             <span class="grow"></span>
-            ${big ? '<button id="shrink">Smaller<kbd>esc</kbd></button>' : ''}
+            ${full ? '<button id="shrink">Back<kbd>esc</kbd></button>' : big ? '<button id="shrink">Smaller<kbd>esc</kbd></button>' : ''}
             ${cards.length > 1 ? `<span class="num">${cards.length - 1} more waiting</span>` : ''}
           </div>`}
       </div>
@@ -137,20 +150,47 @@ function tellNative() {
   const film = cards[0]?.kind === 'film';
   let keys = [];
   if (film && !noteOpen) {
-    keys = ['keep', 'noteAny', 'deleteAny'];
+    keys = ['keep', 'noteAny', 'deleteAny', 'fullAny'];
     // Plain keys are only taken while you're looking at an enlarged card, so they can't catch your typing.
-    if (big) keys.push('noteBare', 'deleteBare', 'escape');
+    if (big || full) keys.push('noteBare', 'deleteBare', 'escape', 'fullBare');
+    if (full && cards[0].data.frames.length > 1) keys.push('left', 'right');
   }
   native({ type: 'keys', keys });
 }
 
+// Tell the panel to cover the screen, or to go back to its corner, once the page matches.
+function syncFull() {
+  const want = full && cards[0]?.kind === 'film';
+  root.classList.toggle('full', want);
+  if (want === sentFull) return;
+  sentFull = want;
+  if (!want) sendSize();
+  native({ type: 'full', on: want });
+}
+
+function setFull(on) {
+  if (cards[0]?.kind !== 'film') on = false;
+  if (on === full) return;
+  full = on;
+  if (on) { bigBeforeFull = big; big = true; } else big = bigBeforeFull;
+  render();
+}
+window.curatorExitFull = () => setFull(false);
+
 function render() {
+  draw();
+  syncFull();
+}
+
+function draw() {
   tellNative();
   stop3D();
   const top = cards[0];
   if (!top) { root.innerHTML = ''; return; }
   const isRule = top.kind === 'rule';
-  root.innerHTML = `<div class="pile ${big && !isRule ? 'big' : ''}">${behindHTML(cards.length - 1)}${isRule ? slipHTML(top.data) : printHTML(top.data)}</div>`;
+  root.innerHTML = `<div class="pile ${big && !isRule ? 'big' : ''} ${full && !isRule ? 'full' : ''}">${behindHTML(cards.length - 1)}${isRule ? slipHTML(top.data) : printHTML(top.data)}</div>${full && !isRule
+    ? `<div class="fullhint">${top.data.frames.length > 1 ? '<kbd>← →</kbd> images · ' : ''}<kbd>⌃⌥K</kbd> keep · <kbd>N</kbd> note · <kbd>F</kbd> or <kbd>esc</kbd> back</div>` : ''}`;
+  root.onclick = (e) => { if (full && e.target === root) setFull(false); };
   if (isRule) {
     document.getElementById('accept').onclick = () => answerRule(true);
     document.getElementById('decline').onclick = () => answerRule(false);
@@ -169,7 +209,7 @@ function render() {
       if (holder) stopViewer = await mount(holder, media(frame.file));
     }).catch(console.error);
   }
-  document.getElementById('shrink')?.addEventListener('click', () => { big = false; render(); });
+  document.getElementById('shrink')?.addEventListener('click', () => { if (full) setFull(false); else { big = false; render(); } });
   document.getElementById('toss').onclick = (e) => { e.stopPropagation(); remove(); };
   if (noteOpen) {
     const box = document.getElementById('note');
@@ -203,6 +243,10 @@ function setUpInk(frame) {
     paint(canvas, marks.get(shown) || [], canvas.width, canvas.height);
   };
   size();
+  // The picture area changes size when the panel goes full screen; keep the marks on it.
+  inkWatch?.disconnect();
+  inkWatch = new ResizeObserver(size);
+  inkWatch.observe(area);
   document.getElementById('pencil').onclick = (e) => { e.stopPropagation(); toggleDrawing(frame); };
   let stroke = null;
   const at = (e) => { const b = canvas.getBoundingClientRect(); return [(e.clientX - b.left) / b.width, (e.clientY - b.top) / b.height]; };
@@ -334,7 +378,7 @@ async function leave(send) {
     console.error(error);
   }
   busy = false;
-  topId = null; big = false; shown = 0;
+  topId = null; big = full; shown = 0;
   resetMarks();
   refresh();
 }
@@ -381,7 +425,16 @@ window.curatorKey = (key) => {
   if (key === 'keep') keep();
   if (key === 'noteAny' || key === 'noteBare') { big = true; openNote(); }
   if (key === 'deleteAny' || key === 'deleteBare') remove();
-  if (key === 'escape') { big = false; drawing = false; render(); }
+  if (key === 'escape') {
+    drawing = false;
+    if (full) setFull(false); else { big = false; render(); }
+  }
+  if (key === 'fullAny' || key === 'fullBare') setFull(!full);
+  if ((key === 'left' || key === 'right') && full && cards[0]?.kind === 'film') {
+    const n = cards[0].data.frames.length;
+    shown = (shown + (key === 'left' ? n - 1 : 1)) % n;
+    render();
+  }
 };
 
 let lastCount = 0;
@@ -395,7 +448,9 @@ async function refresh() {
   const nextTop = cards[0]?.id ?? null;
   if (nextTop !== topId) {
     topId = nextTop;
-    big = false; shown = 0;
+    // Full screen carries on to the next card, so a run of passes can be reviewed up close.
+    if (cards[0]?.kind !== 'film') full = false;
+    big = full; shown = 0;
     resetMarks();
     if (noteOpen) { noteOpen = false; native({ type: 'typing', on: false }); }
     render();

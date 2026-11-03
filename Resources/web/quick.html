@@ -28,6 +28,17 @@
   .notebox .about b { color: var(--ink); }
   .notebox .row { display: flex; gap: 6px; margin-top: 7px; justify-content: flex-end; }
 
+  /* F: the match up close, over the whole screen. */
+  #root.full { position: fixed; inset: 0; width: auto; padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(17,16,16,.94); }
+  #root.full .ring { gap: 48px; }
+  #root.full .contender:hover, #root.full .contender.sel { transform: none; }
+  #root.full .shot { object-fit: contain; }
+  #root.full .clipbar, #root.full .notebox { width: calc(var(--card) * 2 + 48px); }
+  #root.full .label { font-size: 28px; }
+  #root.full .caption { min-height: 72px; }
+  .fullhint { position: absolute; left: 0; right: 0; bottom: 22px; text-align: center; font: 600 13px var(--mono); letter-spacing: .06em; color: rgba(251,250,246,.55); pointer-events: none; }
+  .fullhint kbd { margin: 0 2px 0 0; opacity: .9; }
+
   .pill { display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; margin-top: -14px; background: var(--paper); border: 2px solid var(--black); border-top: 0; font-size: 12px; font-weight: 600; box-shadow: 0 6px 14px rgba(0,0,0,.3); cursor: default; }
   .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--marker); }
 </style>
@@ -38,7 +49,7 @@
 import { api, state, frameHTML, fillModels, markerSVG, reportSize, native, esc, runClips, clipBarHTML, paperHTML } from './common.js';
 
 const root = document.getElementById('root');
-reportSize(root);
+const sendSize = reportSize(root);
 
 const IDLE_TUCK_MS = 45000; // a pick nobody's touched gets out of the way and lets go of the keys
 const ARM_MS = 400;         // a new card waits a moment before it takes the arrow keys
@@ -50,6 +61,7 @@ let armed = false, engaged = false, tucked = false, noteOpen = false, note = '';
 let selected = null, finishing = null;
 let idleTimer = null, armTimer = null, sendTimer = null;
 let stopClips = () => {};
+let full = false, sentFull = false;   // full screen: wanted, and what the panel was last told
 
 function shuffle(list) {
   const out = [...list];
@@ -79,10 +91,10 @@ function tellNative() {
   if (item && !noteOpen) {
     if (tucked) keys = ['bringBack'];
     else if (finishing !== null) keys = ['undo'];
-    else if (armed) {
-      keys = ['left', 'right', 'escape', 'noteAny', 'deleteAny'];
+    else if (armed || full) {
+      keys = ['left', 'right', 'escape', 'noteAny', 'deleteAny', 'fullAny'];
       // Plain keys are only taken once you're using this pick, so they can't catch your typing.
-      if (engaged) keys.push('enter', 'noteBare', 'deleteBare', 'undo');
+      if (engaged || full) keys.push('enter', 'noteBare', 'deleteBare', 'undo', 'fullBare');
     }
   }
   native({ type: 'keys', keys });
@@ -90,7 +102,7 @@ function tellNative() {
 
 function resetIdle() {
   clearTimeout(idleTimer);
-  if (item && !tucked && !noteOpen && finishing === null) idleTimer = setTimeout(() => setTucked(true), IDLE_TUCK_MS);
+  if (item && !tucked && !noteOpen && !full && finishing === null) idleTimer = setTimeout(() => setTucked(true), IDLE_TUCK_MS);
 }
 
 function arm() {
@@ -103,7 +115,7 @@ function arm() {
 function setTucked(on) {
   if (finishing !== null) return;
   tucked = on;
-  if (on) { engaged = false; armed = false; selected = null; clearTimeout(armTimer); }
+  if (on) { engaged = false; armed = false; selected = null; full = false; clearTimeout(armTimer); }
   render();
   tellNative();
   if (!on) arm();
@@ -121,7 +133,50 @@ function contender(index, side, how) {
   </div>`;
 }
 
+// Tell the panel to cover the screen, or to go back to its spot, once the page matches.
+function syncFull() {
+  const want = full && !!item && !tucked && finishing === null;
+  root.classList.toggle('full', want);
+  if (want === sentFull) return;
+  sentFull = want;
+  if (!want) sendSize();
+  native({ type: 'full', on: want });
+}
+
+function setFull(on) {
+  if (!item || tucked || finishing !== null) on = false;
+  if (on === full) return;
+  full = on;
+  if (on) engaged = true;
+  render();
+  tellNative();
+  resetIdle();
+}
+window.curatorExitFull = () => setFull(false);
+
+// Card width: as big as fits. Full screen fills it; otherwise the pair sits along the top.
+function cardSize() {
+  if (!full) return Math.min(380, Math.floor((screen.availWidth - 120) / 2));
+  const clip = item && root.querySelector('.clipbar') ? 64 : 0;
+  const note = noteOpen ? 150 : 0;
+  const photoHeight = innerHeight - 15 - 64 - clip - note - 120;
+  const byWidth = (innerWidth - 48 - 160) / 2;
+  return Math.max(200, Math.floor(Math.min(byWidth, photoHeight * 4 / 3 + 30)));
+}
+
+addEventListener('resize', () => {
+  if (!item || tucked) return;
+  root.style.setProperty('--card', cardSize() + 'px');
+  root.querySelectorAll('.marker').forEach((m) => m.remove());
+  paintSelection();
+});
+
 function render(how = false) {
+  draw(how);
+  syncFull();
+}
+
+function draw(how) {
   stopClips();
   stopClips = () => {};
   if (!item) { root.innerHTML = ''; return; }
@@ -132,8 +187,6 @@ function render(how = false) {
     return;
   }
   if (finishing !== null) { root.innerHTML = ''; return; }
-  const size = Math.min(380, Math.floor((screen.availWidth - 120) / 2));
-  root.style.setProperty('--card', size + 'px');
   const [a, b] = advance().pair;
   root.innerHTML = `
     <div class="ring">${contender(a, 'l', how)}${contender(b, 'r', how)}</div>
@@ -142,7 +195,11 @@ function render(how = false) {
       <div class="about"><b>${esc(item.title)}</b>${item.prompt ? ' · ' + esc(item.prompt) : ''}${item.replacesTitles ? ` · Replaces ${item.replacesTitles.map((t) => `“${esc(t)}”`).join(', ')}` : ''}</div>
       <textarea id="note" placeholder="Goes to the agent word for word…">${esc(note)}</textarea>
       <div class="row"><button id="cancelNote">Cancel</button><button id="sendNone">None of these, redo</button><button class="primary" id="saveNote">Keep choosing</button></div>
-    </div>` : ''}`;
+    </div>` : ''}
+    ${full ? '<div class="fullhint"><kbd>← →</kbd> pick · <kbd>return</kbd> choose · <kbd>N</kbd> note · <kbd>F</kbd> or <kbd>esc</kbd> back</div>' : ''}`;
+  root.style.setProperty('--card', cardSize() + 'px');
+  // Clicking the dark around the cards goes back.
+  root.onclick = (e) => { if (full && (e.target === root || e.target.classList.contains('ring'))) setFull(false); };
   fillModels(root);
   // The two clips of a match play from one clock, so animations compare beat for beat.
   stopClips = runClips(root, `${item.id}:${a}:${b}`);
@@ -258,7 +315,7 @@ function closeNote(save) {
 }
 
 function finish() {
-  item = null; t = null; note = ''; finishing = null; engaged = false; selected = null; armed = false;
+  item = null; t = null; note = ''; finishing = null; engaged = false; selected = null; armed = false; full = false;
   clearTimeout(idleTimer); clearTimeout(armTimer);
   if (noteOpen) { noteOpen = false; native({ type: 'typing', on: false }); }
   // Clear the cards and let go of the keys now; refresh only brings in the next pick if there is one.
@@ -299,7 +356,8 @@ window.curatorKey = (key) => {
   if (key === 'right') select('r');
   if (key === 'enter') commit();
   if (key === 'undo') undo();
-  if (key === 'escape') setTucked(true);
+  if (key === 'escape') { if (full) setFull(false); else setTucked(true); }
+  if (key === 'fullAny' || key === 'fullBare') setFull(!full);
   if (key === 'noteAny' || key === 'noteBare') openNote();
   if (key === 'deleteAny' || key === 'deleteBare') remove();
 };
@@ -312,7 +370,7 @@ async function refresh() {
     clearTimeout(sendTimer);
     item = next;
     t = next ? newTournament(next.frames) : null;
-    engaged = false; tucked = false; note = ''; finishing = null; selected = null;
+    engaged = false; tucked = false; note = ''; finishing = null; selected = null; full = false;
     if (noteOpen) { noteOpen = false; native({ type: 'typing', on: false }); }
     render(next ? 'first' : false);
     if (next) arm(); else { armed = false; tellNative(); }

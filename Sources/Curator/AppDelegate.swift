@@ -20,6 +20,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKSc
     private var quickKeys: Set<Hotkeys.Key> = []
     private var stackKeys: Set<Hotkeys.Key> = []
     private var typing = false
+    /// The overlay showing its cards full screen, if any. It gets every key, and the other one steps aside.
+    private weak var fullOverlay: Overlay?
     private var serverInfoURL: URL { store.home.appendingPathComponent("server.json") }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -149,7 +151,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKSc
 
     private func updateHeldKeys() {
         var keys: Set<Hotkeys.Key> = [.gallery]
-        if !store.data.paused && !typing { keys.formUnion(quickKeys.union(stackKeys)) }
+        if !store.data.paused && !typing {
+            keys.formUnion(fullOverlay === quick ? quickKeys : fullOverlay === stack ? stackKeys : quickKeys.union(stackKeys))
+        }
         heldKeys = keys
         // Test mode never takes real keys from whoever is using this Mac.
         if ProcessInfo.processInfo.environment["CURATOR_QUIET"] != "1" { hotkeys.hold(keys) }
@@ -158,7 +162,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKSc
     /// The pick at the top of the screen gets first say, then the corner stack.
     private func pressed(_ key: Hotkeys.Key) {
         if key == .gallery { return openGallery() }
-        let target: Overlay = quickKeys.contains(key) ? quick : stack
+        let target: Overlay = fullOverlay ?? (quickKeys.contains(key) ? quick : stack)
         target.call("window.curatorKey && window.curatorKey('\(key)')")
     }
 
@@ -169,6 +173,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKSc
             let names = message["keys"] as? [String] ?? []
             let wanted = Set(Hotkeys.Key.allCases.filter { names.contains("\($0)") })
             if overlay === quick { quickKeys = wanted } else { stackKeys = wanted }
+            updateHeldKeys()
+        case "full":
+            let on = message["on"] as? Bool ?? false
+            let other: Overlay = overlay === quick ? stack : quick
+            if on {
+                if let previous = fullOverlay, previous !== overlay {
+                    previous.setFull(false)
+                    previous.call("window.curatorExitFull && window.curatorExitFull()")
+                }
+                fullOverlay = overlay
+                overlay.setFull(true)
+                other.hiddenBehind = true
+            } else if overlay.isFull {
+                overlay.setFull(false)
+                if fullOverlay === overlay {
+                    fullOverlay = nil
+                    other.hiddenBehind = false
+                }
+            }
             updateHeldKeys()
         case "typing":
             typing = message["on"] as? Bool ?? false

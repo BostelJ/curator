@@ -8,6 +8,7 @@ final class Hotkeys {
         case left = 1, right, enter, escape, undo
         case keep, noteAny, noteBare, deleteAny, deleteBare
         case gallery, bringBack
+        case fullAny, fullBare
 
         var combo: (code: Int, modifiers: Int) {
             let hyper = controlKey | optionKey
@@ -24,6 +25,8 @@ final class Hotkeys {
             case .deleteBare: return (kVK_Delete, 0)
             case .gallery: return (kVK_ANSI_G, hyper)
             case .bringBack: return (kVK_ANSI_P, hyper)
+            case .fullAny: return (kVK_ANSI_F, hyper)
+            case .fullBare: return (kVK_ANSI_F, 0)
             }
         }
     }

@@ -33,6 +33,11 @@ final class Overlay: NSObject, WKScriptMessageHandler {
     private var size = NSSize(width: 10, height: 10)
     private var hasContent = false
     var hiddenByPause = false { didSet { applyVisibility() } }
+    /// Hidden while the other overlay has the whole screen.
+    var hiddenBehind = false { didSet { applyVisibility() } }
+    /// Covering the whole screen, to look at the cards up close.
+    private(set) var isFull = false
+    private var fullScreen: NSScreen?
     var onMessage: (([String: Any]) -> Void)?
 
     init(url: URL, anchor: Anchor) {
@@ -85,7 +90,19 @@ final class Overlay: NSObject, WKScriptMessageHandler {
         return NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main ?? NSScreen.screens[0]
     }
 
+    func setFull(_ on: Bool) {
+        guard on != isFull else { return }
+        isFull = on
+        fullScreen = on ? (panel.isVisible ? panel.screen : nil) ?? screen() : nil
+        place()
+        applyVisibility()
+    }
+
     private func place() {
+        if isFull, let full = fullScreen {
+            if panel.frame != full.frame { panel.setFrame(full.frame, display: true) }
+            return
+        }
         guard hasContent else { return }
         let visible = screen().visibleFrame
         var origin = NSPoint.zero
@@ -99,7 +116,7 @@ final class Overlay: NSObject, WKScriptMessageHandler {
     }
 
     private func applyVisibility() {
-        if hasContent && !hiddenByPause {
+        if hasContent && !hiddenByPause && !hiddenBehind {
             if !panel.isVisible { place() }
             panel.orderFrontRegardless()
         } else {
@@ -140,7 +157,7 @@ final class Overlay: NSObject, WKScriptMessageHandler {
         if panel.isKeyWindow {
             panel.resignKey()
             panel.orderOut(nil)
-            if hasContent && !hiddenByPause { panel.orderFrontRegardless() }
+            if hasContent && !hiddenByPause && !hiddenBehind { panel.orderFrontRegardless() }
         }
     }
 

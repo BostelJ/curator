@@ -14,9 +14,10 @@ The user doesn't stop to review. Cards float over whatever they're doing, they a
 3. **Refine, inside that direction.** `curator_refine` with a real pass ("here's your modeled house, any changes?"). Put the most telling view first; for a model, send the `.glb` so they can turn it and zoom in, plus renders if angles matter; for motion, send a clip. Review in stages when it helps: main form, then attachments, then details.
 4. **Keep working while you wait.** Send cards, then `curator_wait` with their ids. If they're still pending when it returns, do other useful work or call it again. Never ask in chat for an answer a card is waiting on.
 5. **Act on the answer.**
-   - `pick`: build from `answer.chosen.path`, with `revises` set to that card. `answer.runnerUp` and `answer.matches` show what lost to what: use them to see what they respond to, and borrow from the runner-up only if a note asks for it.
+   - `pick`: build from `answer.chosen.path`, with `revises` set to that card. `answer.runnerUp` and `answer.matches` show what lost to what: use them to see what they respond to, and borrow from the runner-up only if a note asks for it. If a pick also carries a `note`, the note comes first and the winner is only a tiebreak.
    - `redo`: none of them worked. Read the note and make a new quick pick, with `revises` set.
-   - `note`: follow it literally and send the next pass with `revises` set. Keep what they didn't mention. If `answer.markups` is there, open every file: they drew red marker on the picture to point at exactly what the note is about.
+   - `note` on a **quick pick**: they stopped the bracket to write it, so there's no winner. Do exactly what it says: combine options, draw new ones (a new quick pick with `revises` set), or build one they named. `answer.onScreen` lists the two options that were up while they wrote it, and `answer.matches` has any matches played before that.
+   - `note` on a **refine** card: follow it literally and send the next pass with `revises` set. Keep what they didn't mention. If `answer.markups` is there, open every file: they drew red marker on the picture to point at exactly what the note is about.
    - `delete`: they threw the card away, at any stage. Stop work on it and don't resend it unless they ask.
    - `keep`: done, and it's on the board. Only a Keep is approval. Never describe something as approved or final before it.
 

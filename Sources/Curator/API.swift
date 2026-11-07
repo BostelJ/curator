@@ -47,7 +47,8 @@ final class API {
                 let body = request.json
                 try store.answer(id: body["id"] as? String ?? "", action: body["action"] as? String ?? "",
                                  frameId: body["frameId"] as? String, note: body["note"] as? String,
-                                 matches: matches(body["matches"]), markups: body["markups"] as? [String])
+                                 matches: matches(body["matches"]), markups: body["markups"] as? [String],
+                                 onScreen: body["onScreen"] as? [String])
                 return .json(["ok": true])
             case ("POST", "/api/markup"):
                 let body = request.json
@@ -133,6 +134,12 @@ final class API {
                     }
                 }
             }
+            if let shown = answer.onScreen, !shown.isEmpty {
+                // The note was written while these two were up, so it may be about them.
+                a["onScreen"] = shown.compactMap { id in item.frames.first { $0.id == id } }.map {
+                    ["label": $0.label ?? "", "path": store.path(of: $0.file)]
+                }
+            }
             if answer.action == "keep" || (answer.action == "pick" && item.keepOnPick) { a["onBoard"] = true }
             out["answer"] = a
         }
@@ -168,15 +175,23 @@ final class API {
 
     /// Who beat whom lately: a direct read of preference, even for things never kept.
     private func recentTournaments(_ same: (String) -> Bool) -> [[String: Any]] {
-        let played = store.data.items.filter { same($0.project) && $0.stage == "quick_pick" && $0.answer?.action == "pick" }
+        let played = store.data.items.filter {
+            same($0.project) && $0.stage == "quick_pick" && ($0.answer?.action == "pick" || $0.answer?.action == "note")
+        }
         return played.suffix(12).map { item in
             let label = { (id: String?) -> String in
                 guard let index = item.frames.firstIndex(where: { $0.id == id }) else { return "" }
                 return item.frames[index].label ?? "Option \(index + 1)"
             }
             let last = item.answer?.matches?.last
-            var out: [String: Any] = ["title": item.title, "winner": label(item.answer?.frameId)]
-            if let last { out["runnerUp"] = label(last.winner == last.a ? last.b : last.a) }
+            var out: [String: Any] = ["title": item.title]
+            if item.answer?.action == "note" {
+                out["answeredWithNote"] = true   // they wrote a note instead of finishing the bracket
+                if let shown = item.answer?.onScreen { out["onScreen"] = shown.map { label($0) } }
+            } else {
+                out["winner"] = label(item.answer?.frameId)
+                if let last { out["runnerUp"] = label(last.winner == last.a ? last.b : last.a) }
+            }
             if let note = item.answer?.note { out["note"] = note }
             return out
         }

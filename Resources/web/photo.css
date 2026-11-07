@@ -64,3 +64,9 @@ textarea {
   -webkit-user-select: text; user-select: text;
 }
 textarea::placeholder { color: #8a8378; }
+
+/* The slip that says a note was sent, so it never goes off without a sign it arrived. */
+.sent { display: inline-flex; align-items: center; gap: 10px; margin: 6px; padding: 10px 16px 10px 13px; background: var(--paper); border: 2px solid var(--black); box-shadow: var(--lift); font: 400 20px/1 var(--hand); animation: slip-in .22s cubic-bezier(.2,.9,.25,1.05); }
+.sent .tick { font: 700 17px/1 -apple-system, system-ui, sans-serif; color: var(--marker); }
+.sent.failed { border-color: var(--marker); font: 600 13px/1.3 -apple-system, system-ui, sans-serif; max-width: 520px; }
+@keyframes slip-in { from { transform: translateY(-16px); opacity: 0; } }

@@ -361,7 +361,8 @@ function closeNote() {
 }
 
 // The card leaves the way a tossed print does: down through the air.
-async function leave(send) {
+// `confirm` puts up a slip saying what was sent, so a note never goes off without a sign it arrived.
+async function leave(send, confirm = null) {
   if (busy) return;
   busy = true;
   const card = document.getElementById('card');
@@ -372,10 +373,18 @@ async function leave(send) {
   }
   root.innerHTML = '';
   if (noteOpen) { noteOpen = false; native({ type: 'typing', on: false }); }
+  let failed = null;
   try {
     await send();
   } catch (error) {
     console.error(error);
+    failed = String(error?.message || error);
+  }
+  if (confirm) {
+    root.innerHTML = failed
+      ? `<div class="sent failed">Couldn't send the note: ${esc(failed)}<br>Your words: “${esc(confirm.words || '')}”</div>`
+      : `<div class="sent"><span class="tick">✓</span>${esc(confirm.text)}</div>`;
+    await new Promise((done) => setTimeout(done, failed ? 6000 : 1500));
   }
   busy = false;
   topId = null; big = full; shown = 0;
@@ -404,7 +413,8 @@ async function sendNote(note) {
     }
   }
   const text = note.trim() || 'See my marks.';
-  leave(() => api('/api/answer', { id: top.data.id, action: 'note', note: text, markups: files }));
+  leave(() => api('/api/answer', { id: top.data.id, action: 'note', note: text, markups: files }),
+    { text: 'Note sent to the agent', words: text });
 }
 
 function remove() {

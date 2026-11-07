@@ -22,6 +22,7 @@ struct Answer: Codable {
     var at: Double
     var matches: [Match]?     // a tournament's results, in the order they were played
     var markups: [String]?    // marked-up pictures sent with a note, relative to the media folder
+    var onScreen: [String]?   // a quick pick's note: the two frames up when it was written
 }
 
 struct Item: Codable {
@@ -259,7 +260,7 @@ final class Store {
     // MARK: Answering
 
     func answer(id: String, action: String, frameId: String?, note: String?, matches: [Match]? = nil,
-                markups: [String]? = nil) throws {
+                markups: [String]? = nil, onScreen: [String]? = nil) throws {
         guard let index = data.items.firstIndex(where: { $0.id == id }) else {
             throw StoreError.message("no card with id \(id)")
         }
@@ -276,7 +277,8 @@ final class Store {
             }
         case ("quick_pick", "redo"), ("refine", "keep"), (_, "delete"):
             break
-        case ("refine", "note"):
+        case ("refine", "note"), ("quick_pick", "note"):
+            // On a quick pick, a note ends the pick: it's the answer, with no winner forced out of it.
             guard cleanNote != nil else { throw StoreError.message("a note can't be empty") }
         default:
             throw StoreError.message("\(action) isn't an answer for a \(item.stage) card")
@@ -284,7 +286,8 @@ final class Store {
         data.items[index].status = "answered"
         data.items[index].answer = Answer(action: action, frameId: frameId, note: cleanNote,
                                           at: Date().timeIntervalSince1970, matches: matches,
-                                          markups: markups?.filter { $0.hasPrefix(id + "/") }.nilIfEmpty)
+                                          markups: markups?.filter { $0.hasPrefix(id + "/") }.nilIfEmpty,
+                                          onScreen: onScreen?.filter { frame in item.frames.contains { $0.id == frame } }.nilIfEmpty)
         if action == "keep" || (action == "pick" && item.keepOnPick) {
             makeStrip(from: data.items[index])
         }

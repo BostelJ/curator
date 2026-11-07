@@ -39,6 +39,12 @@
   .fullhint { position: absolute; left: 0; right: 0; bottom: 22px; text-align: center; font: 600 13px var(--mono); letter-spacing: .06em; color: rgba(251,250,246,.55); pointer-events: none; }
   .fullhint kbd { margin: 0 2px 0 0; opacity: .9; }
 
+  /* A note held for the pick, and the slip that says something was sent. */
+  .held { display: inline-flex; align-items: center; gap: 9px; margin: 0 0 12px; padding: 6px 8px 6px 11px; background: var(--paper); border: 1.5px solid var(--black); box-shadow: var(--lift); font-size: 12px; max-width: calc(var(--card) * 2 + 34px); }
+  .held .text { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .held b { color: var(--ink); }
+  #root.full .held { width: calc(var(--card) * 2 + 48px); max-width: none; }
+
   .pill { display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; margin-top: -14px; background: var(--paper); border: 2px solid var(--black); border-top: 0; font-size: 12px; font-weight: 600; box-shadow: 0 6px 14px rgba(0,0,0,.3); cursor: default; }
   .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--marker); }
 </style>
@@ -62,6 +68,7 @@ let selected = null, finishing = null;
 let idleTimer = null, armTimer = null, sendTimer = null;
 let stopClips = () => {};
 let full = false, sentFull = false;   // full screen: wanted, and what the panel was last told
+let sending = false;                  // an answer is on its way and its "sent" slip is showing
 
 function shuffle(list) {
   const out = [...list];
@@ -88,7 +95,7 @@ function advance() {
 
 function tellNative() {
   let keys = [];
-  if (item && !noteOpen) {
+  if (item && !noteOpen && !sending) {
     if (tucked) keys = ['bringBack', 'fullAny'];
     else if (finishing !== null) keys = ['undo'];
     else if (armed || full) {
@@ -137,7 +144,7 @@ function contender(index, side, how) {
 
 // Tell the panel to cover the screen, or to go back to its spot, once the page matches.
 function syncFull() {
-  const want = full && !!item && !tucked && finishing === null;
+  const want = full && !!item && !tucked && finishing === null && !sending;
   root.classList.toggle('full', want);
   if (want === sentFull) return;
   sentFull = want;
@@ -188,15 +195,17 @@ function draw(how) {
     document.getElementById('pill').onclick = () => setTucked(false);
     return;
   }
+  if (sending) return;  // the "sent" slip is up
   if (finishing !== null) { root.innerHTML = ''; return; }
   const [a, b] = advance().pair;
   root.innerHTML = `
+    ${note && !noteOpen ? `<div class="held"><span class="text"><b>Note held</b> · goes with your pick: “${esc(note)}”</span><button id="sendHeld">Send now, skip picking</button></div>` : ''}
     <div class="ring">${contender(a, 'l', how)}${contender(b, 'r', how)}</div>
     ${[a, b].some((i) => item.frames[i].kind === 'video') ? clipBarHTML() : ''}
     ${noteOpen ? `<div class="notebox">
       <div class="about"><b>${esc(item.title)}</b>${item.prompt ? ' · ' + esc(item.prompt) : ''}${item.replacesTitles ? ` · Replaces ${item.replacesTitles.map((t) => `“${esc(t)}”`).join(', ')}` : ''}</div>
-      <textarea id="note" placeholder="Goes to the agent word for word…">${esc(note)}</textarea>
-      <div class="row"><button id="cancelNote">Cancel</button><button id="sendNone">None of these, redo</button><button class="primary" id="saveNote">Keep choosing</button></div>
+      <textarea id="note" placeholder="Goes to the agent word for word. Combine some, none of these, draw more…">${esc(note)}</textarea>
+      <div class="row"><button id="cancelNote">Cancel</button><button id="saveNote" title="Hold the note and finish the bracket; the note goes with your pick">Note + keep picking</button><button class="primary" id="sendNote" title="Ends this pick: the note is the answer">Send note<kbd>↵</kbd></button></div>
     </div>` : ''}
     ${full ? '<div class="fullhint"><kbd>← →</kbd> pick · <kbd>return</kbd> choose · <kbd>N</kbd> note · <kbd>F</kbd> or <kbd>esc</kbd> back</div>' : ''}`;
   root.style.setProperty('--card', cardSize() + 'px');
@@ -209,6 +218,8 @@ function draw(how) {
     el.onclick = () => { selected = el.dataset.side; paintSelection(); commit(); };
     el.querySelector('.toss').onclick = (e) => { e.stopPropagation(); remove(); };
   });
+  const held = document.getElementById('sendHeld');
+  if (held) held.onclick = (e) => { e.stopPropagation(); sendNote(note); };
   paintSelection();
   if (noteOpen) {
     const box = document.getElementById('note');
@@ -216,11 +227,11 @@ function draw(how) {
     box.setSelectionRange(box.value.length, box.value.length);
     box.onkeydown = (e) => {
       if (e.key === 'Escape') closeNote(false);
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); closeNote(true); }
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendNote(box.value); }
     };
     document.getElementById('cancelNote').onclick = () => closeNote(false);
     document.getElementById('saveNote').onclick = () => closeNote(true);
-    document.getElementById('sendNone').onclick = () => redo(box.value);
+    document.getElementById('sendNote').onclick = () => sendNote(box.value);
   }
 }
 
@@ -326,23 +337,47 @@ function finish() {
   refresh();
 }
 
-async function answer(body) {
+// `confirm` puts up a slip saying what was sent, so a note never goes off without a sign it arrived.
+async function answer(body, confirm = null) {
+  if (confirm) {
+    sending = true;
+    full = false;
+    if (noteOpen) { noteOpen = false; native({ type: 'typing', on: false }); }
+    stopClips(); stopClips = () => {};
+    root.innerHTML = '';
+    syncFull();
+    tellNative();
+  }
+  let failed = null;
   try {
     await api('/api/answer', body);
   } catch (error) {
     console.error(error);
+    failed = String(error?.message || error);
+  }
+  if (confirm) {
+    root.innerHTML = failed
+      ? `<div class="sent failed">Couldn't send the note: ${esc(failed)}<br>Your words: “${esc(body.note || '')}”</div>`
+      : `<div class="sent"><span class="tick">✓</span>${esc(confirm)}</div>`;
+    await new Promise((done) => setTimeout(done, failed ? 6000 : 1500));
+    sending = false;
   }
   finish();
 }
 
 function send() {
-  answer({ id: item.id, action: 'pick', frameId: item.frames[finishing].id, note, matches: t.matches });
+  answer({ id: item.id, action: 'pick', frameId: item.frames[finishing].id, note, matches: t.matches },
+    note ? 'Pick and note sent' : null);
 }
 
-function redo(text) {
-  if (!item) return;
+// A note ends the pick: it's the answer, and nobody is made to finish the bracket after writing one.
+function sendNote(text) {
+  const words = (text || '').trim();
+  if (!item || finishing !== null || sending) return;
+  if (!words) { document.getElementById('note')?.focus(); return; }
+  const shown = advance().pair.map((i) => item.frames[i].id);
   tossBoth(1);
-  answer({ id: item.id, action: 'redo', note: text });
+  answer({ id: item.id, action: 'note', note: words, onScreen: shown, matches: t.matches }, 'Note sent to the agent');
 }
 
 function remove() {
@@ -366,6 +401,7 @@ window.curatorKey = (key) => {
 };
 
 async function refresh() {
+  if (sending) return;  // finish() refreshes once the slip is done
   const s = await state();
   const next = s.quick[0] || null;
   waitingBehind = Math.max(s.quick.length - 1, 0);

@@ -4,9 +4,11 @@
 
 **The taste layer between every visual pass.** When an AI agent makes something visual for you, like concept art, a blockout or a 3D model, Curator puts it on your screen as a photo card while you keep working. You answer in seconds, the agent keeps refining, and everything you Keep hangs in a gallery that teaches agents your taste.
 
-Curator is a small Mac menu bar app plus a [Claude Code](https://claude.com/claude-code) connection. Everything stays on your Mac.
+Curator is a small menu bar app for Mac (a tray app on Windows) plus a [Claude Code](https://claude.com/claude-code) connection. Everything stays on your computer.
 
 ## Install
+
+**Mac:**
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/BostelJ/curator/main/scripts/install.sh | bash
@@ -15,6 +17,16 @@ curl -fsSL https://raw.githubusercontent.com/BostelJ/curator/main/scripts/instal
 This installs the latest release to `/Applications`, connects it to Claude Code (an MCP server named `curator` plus its skill), and starts it. Run the same command to update. Then restart any open Claude Code sessions.
 
 Needs macOS 13 or newer, and Claude Code for agents to use it.
+
+**Windows 10 or 11**, in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/BostelJ/curator/main/scripts/install.ps1 | iex
+```
+
+This installs the latest release for your user (no admin needed), connects it to Claude Code, and starts it in the system tray. Run the same command to update. Then restart any open Claude Code sessions.
+
+Or download `Curator-Setup-vX.Y.Z.exe` from [Releases](https://github.com/BostelJ/curator/releases) and run it. It isn't code-signed yet, so Windows SmartScreen may say it "protected your PC": click **More info → Run anyway**. On its first run Curator connects itself to Claude Code if Claude Code is installed; otherwise use **Connect to Claude Code** in its tray menu (right-click the tilted print, which may be under the **^** arrow).
 
 <details>
 <summary>Installing by hand from the Releases page</summary>
@@ -53,9 +65,11 @@ Curator only takes a key while it needs it, because a held key is taken from the
 
 A pick left alone for 45 seconds tucks into a small tab and lets go of the keys. While you type a note, Curator holds nothing but ⌃⌥G. **Pause Cards** is in the menu bar menu.
 
+On Windows, ⌃⌥ is **Ctrl+Alt** (Ctrl+Alt+K Keep, Ctrl+Alt+G art gallery, and so on), Return is **Enter**, and ⌫ is **Backspace** or **Delete**. Pause Cards, Start with Windows and Connect to Claude Code are in the tray icon's menu. A red dot on the tray icon means something is waiting for you.
+
 ## Privacy
 
-Curator runs entirely on your Mac. Cards and kept work live in `~/Library/Application Support/Curator`, and the app only listens on `127.0.0.1`, behind a random token. Nothing is uploaded anywhere.
+Curator runs entirely on your computer. Cards and kept work live in `~/Library/Application Support/Curator` on a Mac and `%LOCALAPPDATA%\Curator` on Windows, and the app only listens on `127.0.0.1`, behind a random token. Nothing is uploaded anywhere.
 
 ## Uninstall
 
@@ -65,6 +79,8 @@ claude mcp remove --scope user curator
 # and, to delete your boards too:
 rm -rf ~/Library/Application\ Support/Curator
 ```
+
+On Windows, uninstall Curator from **Settings → Apps**, then run `claude mcp remove --scope user curator` and delete `%USERPROFILE%\.claude\skills\curator` (and `%LOCALAPPDATA%\Curator` to delete your boards too).
 
 ## Building from source
 
@@ -87,3 +103,16 @@ One binary does both jobs: with no arguments it's the menu bar app, and `Curator
 ### Testing without touching the screen
 
 `CURATOR_HOME=<dir> CURATOR_QUIET=1 CURATOR_DEBUG=1 dist/Curator.app/Contents/MacOS/Curator` runs a copy with separate data. Its panels are invisible, it takes no clicks, keys or typing, and `POST /api/debug` can press keys, run script in a page, and snapshot panels. Quit any installed copy first: only one can run at a time.
+
+### Windows
+
+`windows/` is the Windows app: an Electron tray app that serves the same `Resources/web` pages and speaks the same HTTP and MCP surface, ported from the Swift sources (`store.js` from Store.swift, `api.js` from API.swift and HTTPServer.swift, `mcp.js` from MCP.swift, `main.js` and `overlay.js` from AppDelegate.swift and Overlay.swift). When the Swift side changes how answers are stored or described, change the matching file there too; after changing a tool description in MCP.swift, run `windows/scripts/sync-tools.sh`. Changes to `Resources/web` need nothing: on Windows the pages get Ctrl+Alt key names and Windows fonts as they're served.
+
+```sh
+cd windows && npm install
+npm start                                  # runs it from source (on a Mac too, with its own data folder)
+node scripts/smoke.js                      # end-to-end test through the MCP bridge, invisible
+CURATOR_WINDOWS_LOOK=1 npm start           # on a Mac, shows the pages as Windows will
+```
+
+Claude Code runs the bridge as `Curator.exe resources\app\src\mcp.js` with `ELECTRON_RUN_AS_NODE=1`. A tag builds the installer on a Windows runner, installs it, runs the smoke test against the installed copy, checks that Claude Code can connect to it, and only then publishes the release with both the Mac and Windows downloads. Pushing a branch named `ci/<anything>` runs the same Windows build and tests without releasing.

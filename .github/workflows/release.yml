@@ -1,15 +1,98 @@
 name: Release
 
-# Push a tag like v0.2.0 to build Curator for Apple Silicon and Intel and publish it as a release.
+# Push a tag like v0.2.0 to build Curator for Mac (Apple Silicon and Intel) and Windows, and publish
+# both in one release. The Windows build is tested end to end on a Windows runner first.
 on:
   push:
     tags: ["v*"]
+    # A branch named ci/<anything> builds and tests Windows without releasing, for trying changes.
+    branches: ["ci/**"]
 
 permissions:
   contents: write
 
 jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: windows
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: windows/package-lock.json
+
+      - name: Install
+        run: |
+          npm ci
+          node node_modules/electron/install.js
+
+      - name: Build
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          [[ "$GITHUB_REF" == refs/tags/v* ]] || VERSION="0.0.0-ci.${GITHUB_RUN_NUMBER}"
+          node scripts/make-icon.js
+          npx electron-builder --win --x64 --publish never -c.extraMetadata.version="$VERSION"
+          ls dist
+
+      - name: Test the unpacked app
+        run: node scripts/smoke.js dist/win-unpacked/Curator.exe shots/unpacked
+
+      - name: Test it visibly, with pictures of the real desktop
+        env:
+          SMOKE_VISIBLE: "1"
+        run: node scripts/smoke.js dist/win-unpacked/Curator.exe shots/visible
+
+      - name: Install it the way a person would, and test that copy
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist/Curator-Setup-*.exe | Select-Object -First 1
+          Start-Process $setup.FullName -ArgumentList '/S' -Wait
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\Curator\Curator.exe'
+          if (-not (Test-Path $exe)) { Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs') -Recurse -Filter Curator.exe | Format-List FullName; throw "Curator.exe isn't where the installer script looks" }
+          node scripts/smoke.js $exe shots/installed
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # Connecting to Claude Code: there's no claude on the runner, so it should say so plainly.
+          $env:ELECTRON_RUN_AS_NODE = '1'
+          $out = & $exe (Join-Path (Split-Path $exe) 'resources\app\src\connect.js') 2>&1
+          Write-Output "connect.js said: $out (exit $LASTEXITCODE)"
+          if ($LASTEXITCODE -ne 2 -or "$out" -notmatch "isn't installed") { throw "connect.js didn't report the missing Claude Code" }
+
+      - name: Connect to Claude Code, and check Claude Code can reach Curator
+        shell: pwsh
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\Curator\Curator.exe'
+          $env:ELECTRON_RUN_AS_NODE = '1'
+          & $exe (Join-Path (Split-Path $exe) 'resources\app\src\connect.js')
+          if ($LASTEXITCODE -ne 0) { throw "connect.js failed ($LASTEXITCODE)" }
+          Remove-Item Env:ELECTRON_RUN_AS_NODE
+          claude mcp get curator
+          $list = claude mcp list 2>&1 | Out-String
+          Write-Output $list
+          if ($list -notmatch 'curator.*Connected') { throw "Claude Code couldn't start Curator's MCP bridge" }
+          if (-not (Test-Path (Join-Path $env:USERPROFILE '.claude\skills\curator\SKILL.md'))) { throw 'the skill was not installed' }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-snapshots
+          path: windows/shots
+          if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: windows/dist/Curator-Setup-*.exe
+
   release:
+    needs: windows
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -20,9 +103,14 @@ jobs:
           lipo -archs dist/Curator.app/Contents/MacOS/Curator
           ditto -c -k --keepParent dist/Curator.app "dist/Curator-${GITHUB_REF_NAME}.zip"
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-installer
+          path: dist
+
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" "dist/Curator-${GITHUB_REF_NAME}.zip" \
+          gh release create "$GITHUB_REF_NAME" "dist/Curator-${GITHUB_REF_NAME}.zip" "dist/Curator-Setup-${GITHUB_REF_NAME}.exe" \
             --title "Curator ${GITHUB_REF_NAME}" --generate-notes

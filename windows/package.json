@@ -1,0 +1,47 @@
+{
+  "name": "curator",
+  "productName": "Curator",
+  "version": "0.0.0-dev",
+  "description": "The taste layer between every visual pass.",
+  "author": "BostelJ",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "icon": "node scripts/make-icon.js",
+    "test": "node scripts/smoke.js",
+    "dist": "node scripts/make-icon.js && electron-builder --win --x64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "45.2.3",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "com.bostelj.curator",
+    "productName": "Curator",
+    "copyright": "BostelJ",
+    "directories": { "output": "dist", "buildResources": "build" },
+    "files": ["package.json", "src/**/*"],
+    "asar": false,
+    "extraResources": [
+      { "from": "../Resources/web", "to": "web" },
+      { "from": "../skill/curator/SKILL.md", "to": "skill/SKILL.md" }
+    ],
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "build/icon.ico",
+      "executableName": "Curator"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "artifactName": "Curator-Setup-v${version}.exe",
+      "shortcutName": "Curator",
+      "uninstallDisplayName": "Curator",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true
+    },
+    "publish": null
+  }
+}

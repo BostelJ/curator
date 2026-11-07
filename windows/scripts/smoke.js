@@ -32,9 +32,18 @@ async function desktop(name) {
     path.join(__dirname, 'screenshot.ps1'), path.join(shots, `desktop-${name}.png`)], { stdio: 'inherit' }).on('exit', resolve));
 }
 let failures = 0;
+/** On GitHub Actions, a failure also becomes an annotation, readable without opening the log. */
+function annotate(text) {
+  if (!process.env.GITHUB_ACTIONS) return;
+  const clean = String(text).slice(0, 3000).replace(/%/g, '%25').replace(/\r/g, '').replace(/\n/g, '%0A');
+  console.log(`::error title=smoke (${shots ? path.basename(shots) : 'test'})::${clean}`);
+}
 function check(what, ok, detail) {
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}${ok || detail === undefined ? '' : ' :: ' + JSON.stringify(detail)}`);
-  if (!ok) failures++;
+  if (!ok) {
+    failures++;
+    annotate(`${what}${detail === undefined ? '' : ' :: ' + JSON.stringify(detail)}`);
+  }
 }
 
 // Test pictures
@@ -233,13 +242,17 @@ async function main() {
 }
 
 main()
-  .catch((error) => { failures++; console.error('FAIL', error.stack || error); })
+  .catch((error) => { failures++; console.error('FAIL', error.stack || error); annotate(error.stack || error); })
   .finally(async () => {
     mcp.stdin.end();
     appProc.kill();
     await sleep(500);
     try { fs.rmSync(home, { recursive: true, force: true }); } catch {}
     console.log(failures ? `\n${failures} failed` : '\nAll passed');
-    if (failures && appLog) console.log('--- app log ---\n' + appLog.slice(-4000));
+    if (failures && appLog) {
+      console.log('--- app log ---\n' + appLog.slice(-4000));
+      annotate('app log: ' + appLog.slice(-2500));
+    }
+    if (failures && mcpErr) annotate('bridge stderr: ' + mcpErr.slice(-2500));
     process.exit(failures ? 1 : 0);
   });

@@ -54,14 +54,19 @@ jobs:
           $setup = Get-ChildItem dist/Curator-Setup-*.exe | Select-Object -First 1
           Start-Process $setup.FullName -ArgumentList '/S' -Wait
           $exe = Join-Path $env:LOCALAPPDATA 'Programs\Curator\Curator.exe'
-          if (-not (Test-Path $exe)) { Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs') -Recurse -Filter Curator.exe | Format-List FullName; throw "Curator.exe isn't where the installer script looks" }
+          if (-not (Test-Path $exe)) {
+            $found = (Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs') -Recurse -Filter Curator.exe -ErrorAction SilentlyContinue | ForEach-Object FullName) -join ', '
+            Write-Output "::error::Curator.exe isn't at $exe. Found: $found"
+            exit 1
+          }
+          Get-Process Curator -ErrorAction SilentlyContinue | Format-Table Id, Path
           node scripts/smoke.js $exe shots/installed
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           # Connecting to Claude Code: there's no claude on the runner, so it should say so plainly.
           $env:ELECTRON_RUN_AS_NODE = '1'
           $out = & $exe (Join-Path (Split-Path $exe) 'resources\app\src\connect.js') 2>&1
           Write-Output "connect.js said: $out (exit $LASTEXITCODE)"
-          if ($LASTEXITCODE -ne 2 -or "$out" -notmatch "isn't installed") { throw "connect.js didn't report the missing Claude Code" }
+          if ($LASTEXITCODE -ne 2 -or "$out" -notmatch "isn't installed") { Write-Output "::error::connect.js without Claude Code said: $out (exit $LASTEXITCODE)"; exit 1 }
 
       - name: Connect to Claude Code, and check Claude Code can reach Curator
         shell: pwsh
@@ -70,13 +75,13 @@ jobs:
           $exe = Join-Path $env:LOCALAPPDATA 'Programs\Curator\Curator.exe'
           $env:ELECTRON_RUN_AS_NODE = '1'
           & $exe (Join-Path (Split-Path $exe) 'resources\app\src\connect.js')
-          if ($LASTEXITCODE -ne 0) { throw "connect.js failed ($LASTEXITCODE)" }
+          if ($LASTEXITCODE -ne 0) { Write-Output "::error::connect.js failed ($LASTEXITCODE)"; exit 1 }
           Remove-Item Env:ELECTRON_RUN_AS_NODE
           claude mcp get curator
           $list = claude mcp list 2>&1 | Out-String
           Write-Output $list
-          if ($list -notmatch 'curator.*Connected') { throw "Claude Code couldn't start Curator's MCP bridge" }
-          if (-not (Test-Path (Join-Path $env:USERPROFILE '.claude\skills\curator\SKILL.md'))) { throw 'the skill was not installed' }
+          if ($list -notmatch 'curator.*Connected') { Write-Output "::error::Claude Code couldn't start Curator's MCP bridge: $($list -replace "`r?`n", '%0A')"; exit 1 }
+          if (-not (Test-Path (Join-Path $env:USERPROFILE '.claude\skills\curator\SKILL.md'))) { Write-Output '::error::the skill was not installed'; exit 1 }
 
       - uses: actions/upload-artifact@v4
         if: always()

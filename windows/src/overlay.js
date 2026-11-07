@@ -144,6 +144,8 @@ class Overlay {
     this.win.setFocusable(true);
     this.win.focus();
     this.win.webContents.focus();
+    // Becoming focusable puts a button on the Windows taskbar; a card never wants one.
+    this.win.setSkipTaskbar(true);
   }
 
   /** Hand typing back to the app that was in front. */
@@ -159,6 +161,7 @@ class Overlay {
       if (this.shouldShow) {
         this.win.showInactive();
         this.win.setAlwaysOnTop(true, 'screen-saver');
+        this.win.setSkipTaskbar(true);
       }
     }
   }

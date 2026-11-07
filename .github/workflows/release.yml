@@ -46,6 +46,7 @@ jobs:
       - name: Test it visibly, with pictures of the real desktop
         env:
           SMOKE_VISIBLE: "1"
+          SMOKE_SHOT_NOTES: ${{ !startsWith(github.ref, 'refs/tags/') }}
         run: node scripts/smoke.js dist/win-unpacked/Curator.exe shots/visible
 
       - name: Install it the way a person would, and test that copy

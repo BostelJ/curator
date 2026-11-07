@@ -36,11 +36,17 @@ if (-not (Test-Path $exe)) { throw "The installer finished, but $exe isn't there
 Say "Installed $exe"
 
 # Connect to Claude Code: the MCP server `curator` at user scope, plus its skill.
+# Curator.exe is a windowed program, so PowerShell only waits for it (and gets its words) through Start-Process.
+$script = Join-Path (Split-Path $exe) 'resources\app\src\connect.js'
+$out = [IO.Path]::GetTempFileName()
+$err = [IO.Path]::GetTempFileName()
 $env:ELECTRON_RUN_AS_NODE = '1'
 try {
-  & $exe (Join-Path (Split-Path $exe) 'resources\app\src\connect.js')
+  Start-Process $exe -ArgumentList "`"$script`"" -Wait -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
+  Get-Content $out, $err | Where-Object { $_ } | ForEach-Object { Say $_ }
 } finally {
   Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
+  Remove-Item $out, $err -ErrorAction SilentlyContinue
 }
 
 Start-Process $exe

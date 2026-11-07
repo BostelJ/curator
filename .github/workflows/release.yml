@@ -63,20 +63,26 @@ jobs:
           node scripts/smoke.js $exe shots/installed
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           # Connecting to Claude Code: there's no claude on the runner, so it should say so plainly.
+          # Curator.exe is a windowed program, so PowerShell only waits for it through Start-Process.
+          $script = Join-Path (Split-Path $exe) 'resources\app\src\connect.js'
           $env:ELECTRON_RUN_AS_NODE = '1'
-          $out = & $exe (Join-Path (Split-Path $exe) 'resources\app\src\connect.js') 2>&1
-          Write-Output "connect.js said: $out (exit $LASTEXITCODE)"
-          if ($LASTEXITCODE -ne 2 -or "$out" -notmatch "isn't installed") { Write-Output "::error::connect.js without Claude Code said: $out (exit $LASTEXITCODE)"; exit 1 }
+          $p = Start-Process $exe -ArgumentList "`"$script`"" -Wait -PassThru -NoNewWindow -RedirectStandardOutput connect-out.txt -RedirectStandardError connect-err.txt
+          $out = (Get-Content connect-out.txt, connect-err.txt -Raw) -join ' '
+          Write-Output "connect.js said: $out (exit $($p.ExitCode))"
+          if ($p.ExitCode -ne 2 -or "$out" -notmatch "isn't installed") { Write-Output "::error::connect.js without Claude Code said: $out (exit $($p.ExitCode))"; exit 1 }
 
       - name: Connect to Claude Code, and check Claude Code can reach Curator
         shell: pwsh
         run: |
           npm install -g @anthropic-ai/claude-code
           $exe = Join-Path $env:LOCALAPPDATA 'Programs\Curator\Curator.exe'
+          $script = Join-Path (Split-Path $exe) 'resources\app\src\connect.js'
           $env:ELECTRON_RUN_AS_NODE = '1'
-          & $exe (Join-Path (Split-Path $exe) 'resources\app\src\connect.js')
-          if ($LASTEXITCODE -ne 0) { Write-Output "::error::connect.js failed ($LASTEXITCODE)"; exit 1 }
+          $p = Start-Process $exe -ArgumentList "`"$script`"" -Wait -PassThru -NoNewWindow -RedirectStandardOutput connect-out.txt -RedirectStandardError connect-err.txt
           Remove-Item Env:ELECTRON_RUN_AS_NODE
+          $out = (Get-Content connect-out.txt, connect-err.txt -Raw) -join ' '
+          Write-Output "connect.js said: $out"
+          if ($p.ExitCode -ne 0) { Write-Output "::error::connect.js failed ($($p.ExitCode)): $out"; exit 1 }
           claude mcp get curator
           $list = claude mcp list 2>&1 | Out-String
           Write-Output $list

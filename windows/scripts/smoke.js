@@ -30,11 +30,6 @@ async function desktop(name) {
   fs.mkdirSync(shots, { recursive: true });
   await new Promise((resolve) => spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
     path.join(__dirname, 'screenshot.ps1'), path.join(shots, `desktop-${name}.png`)], { stdio: 'inherit' }).on('exit', resolve));
-  // On test branches, post the picture as a notice, which can be read without signing in.
-  const small = path.join(shots, `desktop-${name}-small.jpg`);
-  if (process.env.SMOKE_SHOT_NOTES === 'true' && fs.existsSync(small)) {
-    console.log(`::notice title=desktop-${name}::${fs.readFileSync(small).toString('base64')}`);
-  }
 }
 let failures = 0;
 /** On GitHub Actions, a failure also becomes an annotation, readable without opening the log. */

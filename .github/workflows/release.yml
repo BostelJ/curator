@@ -46,7 +46,6 @@ jobs:
       - name: Test it visibly, with pictures of the real desktop
         env:
           SMOKE_VISIBLE: "1"
-          SMOKE_SHOT_NOTES: ${{ !startsWith(github.ref, 'refs/tags/') }}
         run: node scripts/smoke.js dist/win-unpacked/Curator.exe shots/visible
 
       - name: Install it the way a person would, and test that copy
@@ -89,6 +88,15 @@ jobs:
           Write-Output $list
           if ($list -notmatch 'curator.*Connected') { Write-Output "::error::Claude Code couldn't start Curator's MCP bridge: $($list -replace "`r?`n", '%0A')"; exit 1 }
           if (-not (Test-Path (Join-Path $env:USERPROFILE '.claude\skills\curator\SKILL.md'))) { Write-Output '::error::the skill was not installed'; exit 1 }
+
+      - name: On test branches, put the desktop pictures on the shots/windows branch
+        if: always() && !startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          mkdir -p /tmp/shots && cp -r shots/. /tmp/shots/ 2>/dev/null || true
+          cd /tmp/shots && git init -q -b shots/windows && git add -A
+          git -c user.name=ci -c user.email=ci@users.noreply.github.com commit -qm "Windows desktop pictures from $GITHUB_SHA" || exit 0
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" shots/windows
 
       - uses: actions/upload-artifact@v4
         if: always()
